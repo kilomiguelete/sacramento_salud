@@ -670,101 +670,227 @@ async function generatePDF(){
   try{
     const{jsPDF}=window.jspdf;
     const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-    const W=210,mg=16,cW=W-mg*2;let y=0;
-    const C={bg:[11,18,32],sf:[18,30,48],tx:[224,234,248],mu:[107,139,173],go:[29,158,117],wa:[201,139,10],ba:[217,64,64]};
-    function np(){doc.addPage();y=16;doc.setFillColor(...C.sf);doc.rect(0,0,W,10,'F');doc.setFontSize(8);doc.setTextColor(...C.mu);doc.setFont('helvetica','normal');doc.text('INFORME SALUD NOCTURNA · SACRAMENTO',mg,6.5);doc.text(`Pág. ${doc.internal.getCurrentPageInfo().pageNumber}`,W-mg,6.5,{align:'right'});y=18;}
-    function cy(n=12){if(y+n>280)np();}
-    function stitle(t){cy(14);doc.setFillColor(...C.sf);doc.rect(mg,y,cW,8,'F');doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(...C.mu);doc.text(t.toUpperCase(),mg+3,y+5.5);y+=12;}
-    function sep(){cy(4);doc.setDrawColor(...C.sf);doc.setLineWidth(0.3);doc.line(mg,y,W-mg,y);y+=4;}
+    const W=210, mg=14, cW=W-mg*2;
+    let y=0, pageNum=0;
 
-    const days=pdfSelectedRange;
-    const crit=days.filter(d=>summaries[d]?.spo2_min!=null&&summaries[d].spo2_min<90);
-    const warn=days.filter(d=>summaries[d]?.spo2_min!=null&&summaries[d].spo2_min<94);
+    // ── Paleta limpia para impresión ───────────────────────────────────────
+    const BLACK  =[20,20,20];
+    const GRAY1  =[80,80,80];     // texto secundario
+    const GRAY2  =[140,140,140];  // texto débil
+    const LGRAY  =[240,240,240];  // fondo fila par / cabecera sección
+    const BORDER =[210,210,210];  // líneas de tabla
+    const RED    =[200,40,40];    // crítico
+    const ORANGE =[180,110,0];    // bajo
+    const GREEN  =[30,140,80];    // normal / bueno
 
-    setProgress(10,'Portada…');
-    doc.setFillColor(...C.bg);doc.rect(0,0,W,60,'F');
-    doc.setFontSize(22);doc.setFont('helvetica','bold');doc.setTextColor(...C.tx);doc.text('Informe de salud nocturna',mg,28);
-    doc.setFontSize(11);doc.setFont('helvetica','normal');doc.setTextColor(...C.mu);
-    doc.text('Apple Watch · Sacramento',mg,37);
-    doc.text(`Generado el ${new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`,mg,44);
-    doc.text(`Período: ${fmtDateShort(days[0])} – ${fmtDateShort(days[days.length-1])} · ${days.length} días`,mg,51);
-    doc.setFillColor(...C.sf);doc.roundedRect(mg,54,cW,24,3,3,'F');
-    [[days.length+' días','analizados',C.tx],[warn.length+' días','SpO2 < 94%',C.wa],[crit.length+' días','SpO2 < 90% crítico',C.ba]].forEach(([v,l,c],i)=>{
-      const cx=mg+cW/3*i+cW/6;
-      doc.setFontSize(14);doc.setFont('helvetica','bold');doc.setTextColor(...c);doc.text(v,cx,63,{align:'center'});
-      doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...C.mu);doc.text(l,cx,69,{align:'center'});
-    });
-    y=86;
+    function header(){
+      pageNum++;
+      // Banda superior fina
+      doc.setFillColor(30,30,30);doc.rect(0,0,W,8,'F');
+      doc.setFontSize(7);doc.setFont('helvetica','normal');doc.setTextColor(180,180,180);
+      doc.text('INFORME DE SALUD NOCTURNA · SACRAMENTO',mg,5.5);
+      doc.text(`Página ${pageNum}`,W-mg,5.5,{align:'right'});
+      y=16;
+    }
+    function newPage(){doc.addPage();header();}
+    function cy(n=10){if(y+n>286)newPage();}
 
-    setProgress(20,'Tabla resumen…');
-    stitle('Resumen por día');
-    doc.setFillColor(...C.sf);doc.rect(mg,y-1,cW,7,'F');
-    doc.setFontSize(7.5);doc.setFont('helvetica','bold');doc.setTextColor(...C.mu);
-    const cols=[0,38,56,72,92,112,132,152,170];
-    ['Fecha','SpO2 mín','prom','Sueño','Efic.','FC rep.','Perturb.','Caídas<94','Resp.'].forEach((h,i)=>doc.text(h,mg+cols[i],y+4));
-    y+=10;
-
-    for(let di=0;di<days.length;di++){
-      const d=days[di];
-      if(di%20===0){setProgress(20+Math.round(di/days.length*50),`Día ${di+1}/${days.length}…`);await new Promise(r=>setTimeout(r,0));}
-      cy(7);const s=summaries[d];if(!s)continue;
-      const{sleep,vitals,spo2_min,spo2_avg,ev94,ev90}=s;
-      const isCrit=spo2_min!=null&&spo2_min<90,isWarn=spo2_min!=null&&spo2_min<94;
-      if(isCrit){doc.setFillColor(217,64,64,0.08);doc.rect(mg,y-4,cW,6.5,'F');}
-      const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
-      const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
-      doc.setFontSize(8);doc.setFont('helvetica',isCrit?'bold':'normal');doc.setTextColor(...(isCrit?C.ba:isWarn?C.wa:C.tx));
-      doc.text(fmtDateMed(d).substring(0,24),mg+cols[0],y);
-      doc.setFont('helvetica','bold');doc.setTextColor(...(isCrit?C.ba:isWarn?C.wa:C.tx));
-      doc.text(spo2_min!=null?(isCrit?'⚠':'')+spo2_min+'%':'–',mg+cols[1],y);
-      doc.setFont('helvetica','normal');doc.setTextColor(...C.tx);
-      doc.text(spo2_avg!=null?spo2_avg+'%':'–',mg+cols[2],y);
-      doc.text(fmtH(sleep?.total_sleep),mg+cols[3],y);
-      doc.text(eff!=null?eff+'%':'–',mg+cols[4],y);
-      doc.text(vitals?.resting_heart_rate!=null?Math.round(vitals.resting_heart_rate)+' bpm':'–',mg+cols[5],y);
-      doc.text(vitals?.breathing_disturbances!=null?vitals.breathing_disturbances.toFixed(1):'–',mg+cols[6],y);
-      doc.text(ev94!=null?String(ev94):'–',mg+cols[7],y);
-      doc.text(vitals?.respiratory_rate_avg!=null?Math.round(vitals.respiratory_rate_avg)+'rpm':'–',mg+cols[8],y);
-      y+=7;sep();
+    // ── Sección título ─────────────────────────────────────────────────────
+    function sectionTitle(title){
+      cy(12);
+      doc.setFillColor(...LGRAY);doc.rect(mg,y,cW,7,'F');
+      doc.setDrawColor(...BORDER);doc.setLineWidth(0.1);doc.rect(mg,y,cW,7,'S');
+      doc.setFontSize(8);doc.setFont('helvetica','bold');doc.setTextColor(...GRAY1);
+      doc.text(title.toUpperCase(),mg+3,y+4.8);
+      y+=11;
     }
 
+    // ── Línea divisoria ────────────────────────────────────────────────────
+    function divider(){
+      cy(3);
+      doc.setDrawColor(...BORDER);doc.setLineWidth(0.1);
+      doc.line(mg,y,W-mg,y);
+      y+=3;
+    }
+
+    // ── PORTADA ────────────────────────────────────────────────────────────
+    header();
+
+    // Título principal
+    doc.setFontSize(24);doc.setFont('helvetica','bold');doc.setTextColor(...BLACK);
+    doc.text('Informe de salud nocturna',mg,y+10);
+    doc.setFontSize(12);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);
+    doc.text('Apple Watch · Sacramento',mg,y+19);
+    y+=28;
+
+    // Línea decorativa
+    doc.setDrawColor(30,30,30);doc.setLineWidth(0.5);doc.line(mg,y,mg+60,y);
+    y+=6;
+
+    // Metadatos
+    doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);
+    const days=pdfSelectedRange;
+    doc.text(`Generado el ${new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`,mg,y);y+=5;
+    doc.text(`Período analizado: ${fmtDateMed(days[0])} — ${fmtDateMed(days[days.length-1])}`,mg,y);y+=5;
+    doc.text(`Total de días: ${days.length}`,mg,y);y+=12;
+
+    // Bloque resumen con borde
+    const crit=days.filter(d=>summaries[d]?.spo2_min!=null&&summaries[d].spo2_min<90);
+    const warn=days.filter(d=>summaries[d]?.spo2_min!=null&&summaries[d].spo2_min<94&&summaries[d].spo2_min>=90);
+    const critEv=days.reduce((s,d)=>s+(summaries[d]?.ev90||0),0);
+
+    doc.setDrawColor(...BORDER);doc.setLineWidth(0.3);doc.roundedRect(mg,y,cW,28,2,2,'S');
+
+    const statCols=[[0,'Días analizados',days.length,BLACK],[cW/3,'Noches SpO2 < 94%',warn.length+crit.length,warn.length+crit.length>0?ORANGE:GREEN],[cW*2/3,'Noches SpO2 < 90%',crit.length,crit.length>0?RED:GREEN]];
+    statCols.forEach(([x,lbl,val,col])=>{
+      const cx=mg+x+cW/6;
+      doc.setFontSize(20);doc.setFont('helvetica','bold');doc.setTextColor(...col);
+      doc.text(String(val),cx,y+14,{align:'center'});
+      doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY2);
+      doc.text(lbl,cx,y+21,{align:'center'});
+    });
+    y+=36;
+
+    if(critEv>0){
+      doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(...RED);
+      doc.text(`⚠  Total de eventos SpO2 < 90% registrados: ${critEv}`,mg,y);
+      y+=8;
+    }
+
+    // ── TABLA RESUMEN ──────────────────────────────────────────────────────
+    setProgress(20,'Generando tabla…');
+    sectionTitle('Resumen por día');
+
+    // Cabecera de tabla
+    const TC={a:0,b:34,c:51,d:67,e:86,f:104,g:123,h:143,i:161};
+    doc.setFillColor(50,50,50);doc.rect(mg,y-1,cW,7,'F');
+    doc.setFontSize(7.5);doc.setFont('helvetica','bold');doc.setTextColor(255,255,255);
+    [['Fecha',TC.a],['SpO2 mín',TC.b],['Prom',TC.c],['Sueño',TC.d],['Efic.',TC.e],['FC rep.',TC.f],['Perturb.',TC.g],['Caídas',TC.h],['Resp.',TC.i]]
+      .forEach(([h,x])=>doc.text(h,mg+x,y+4));
+    y+=9;
+
+    for(let di=0;di<days.length;di++){
+      if(di%20===0){setProgress(20+Math.round(di/days.length*50),`Procesando día ${di+1}/${days.length}…`);await new Promise(r=>setTimeout(r,0));}
+      cy(6.5);
+      const d=days[di],s=summaries[d];if(!s)continue;
+      const{sleep,vitals,spo2_min,spo2_avg,ev94,ev90}=s;
+      const isCrit=spo2_min!=null&&spo2_min<90;
+      const isWarn=spo2_min!=null&&spo2_min>=90&&spo2_min<94;
+      const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
+      const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
+
+      // Fila alternada (gris muy claro en pares)
+      if(di%2===0){doc.setFillColor(248,248,248);doc.rect(mg,y-4.5,cW,6.5,'F');}
+
+      // Indicador lateral para filas críticas
+      if(isCrit){doc.setFillColor(...RED);doc.rect(mg,y-4.5,2,6.5,'F');}
+      else if(isWarn){doc.setFillColor(...ORANGE);doc.rect(mg,y-4.5,2,6.5,'F');}
+
+      doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...BLACK);
+      doc.text(fmtDateShort(d),mg+TC.a+3,y);
+
+      // SpO2 mínimo con color
+      doc.setFont('helvetica','bold');
+      doc.setTextColor(...(isCrit?RED:isWarn?ORANGE:GREEN));
+      doc.text(spo2_min!=null?spo2_min+'%':'–',mg+TC.b,y);
+
+      doc.setFont('helvetica','normal');doc.setTextColor(...BLACK);
+      doc.text(spo2_avg!=null?spo2_avg+'%':'–',mg+TC.c,y);
+      doc.text(fmtH(sleep?.total_sleep),mg+TC.d,y);
+      doc.setTextColor(eff!=null?(eff>=85?GREEN[0]:eff>=75?ORANGE[0]:RED[0]):GRAY2[0],eff!=null?(eff>=85?GREEN[1]:eff>=75?ORANGE[1]:RED[1]):GRAY2[1],eff!=null?(eff>=85?GREEN[2]:eff>=75?ORANGE[2]:RED[2]):GRAY2[2]);
+      doc.text(eff!=null?eff+'%':'–',mg+TC.e,y);
+      doc.setTextColor(...BLACK);
+      doc.text(vitals?.resting_heart_rate!=null?Math.round(vitals.resting_heart_rate)+' bpm':'–',mg+TC.f,y);
+      const bd=vitals?.breathing_disturbances;
+      doc.setTextColor(...(bd>15?RED:bd>10?ORANGE:BLACK));
+      doc.text(bd!=null?bd.toFixed(1):'–',mg+TC.g,y);
+      doc.setTextColor(...(ev94>10?RED:ev94>5?ORANGE:BLACK));
+      doc.text(ev94!=null?String(ev94):'–',mg+TC.h,y);
+      doc.setTextColor(...BLACK);
+      doc.text(vitals?.respiratory_rate_avg!=null?Math.round(vitals.respiratory_rate_avg)+'rpm':'–',mg+TC.i,y);
+
+      // Línea inferior fina
+      doc.setDrawColor(...BORDER);doc.setLineWidth(0.05);doc.line(mg,y+2,W-mg,y+2);
+      y+=6.5;
+    }
+
+    // ── EVENTOS CRÍTICOS ──────────────────────────────────────────────────
     setProgress(75,'Eventos críticos…');await new Promise(r=>setTimeout(r,0));
     const daysWithEvents=days.filter(d=>summaries[d]?.ev94>0);
     if(daysWithEvents.length){
-      cy(20);stitle('Eventos de SpO2 por debajo del umbral (< 94%)');
+      cy(20);sectionTitle('Detalle de eventos SpO2 por debajo del 94%');
+      doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(...GRAY2);
+      doc.text('Los días marcados con ■ en rojo tuvieron caídas por debajo del 90% (crítico).',mg,y);y+=8;
+
       for(const d of daysWithEvents){
-        const s=summaries[d];cy(12);
-        doc.setFontSize(10);doc.setFont('helvetica','bold');doc.setTextColor(...C.tx);
-        doc.text(fmtDateMed(d),mg,y);
-        doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(...C.mu);
-        doc.text(`SpO2 mín: ${s.spo2_min}% · caídas <94%: ${s.ev94} · caídas <90%: ${s.ev90}`,mg+70,y);
-        y+=7;
+        const s=summaries[d];cy(14);
+
+        // Cabecera del día
+        doc.setFillColor(...(s.ev90>0?[255,245,245]:[245,245,245]));
+        doc.rect(mg,y-2,cW,9,'F');
+        if(s.ev90>0){doc.setFillColor(...RED);doc.rect(mg,y-2,3,9,'F');}
+        doc.setFontSize(9.5);doc.setFont('helvetica','bold');doc.setTextColor(...BLACK);
+        doc.text(fmtDateMed(d),mg+5,y+4.5);
+        doc.setFontSize(8.5);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);
+        doc.text(`SpO2 mín: ${s.spo2_min}%   Caídas <94%: ${s.ev94}   Caídas <90%: ${s.ev90}`,mg+60,y+4.5);
+        y+=13;
+
         if(dayDetail[d]){
-          dayDetail[d].spo2.filter(p=>p.value<94).sort((a,b)=>a.time.localeCompare(b.time)).forEach(ev=>{
-            cy(6);const isCrit=ev.value<90;
-            doc.setFontSize(8.5);doc.setFont('helvetica','normal');doc.setTextColor(...C.mu);doc.text(ev.time,mg+4,y);
-            doc.setFont('helvetica','bold');doc.setTextColor(...(isCrit?C.ba:C.wa));doc.text(ev.value+'%',mg+22,y);
-            doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...C.mu);doc.text(isCrit?'⚠ CRÍTICO':'bajo',mg+38,y);y+=5.5;
+          const evts=dayDetail[d].spo2.filter(p=>p.value<94).sort((a,b)=>a.time.localeCompare(b.time));
+          // Cabecera mini-tabla
+          doc.setFontSize(7.5);doc.setFont('helvetica','bold');doc.setTextColor(...GRAY2);
+          doc.text('Hora',mg+4,y);doc.text('SpO2',mg+22,y);doc.text('Nivel',mg+36,y);
+          y+=5;
+          evts.forEach(ev=>{
+            cy(5);
+            const isCrit=ev.value<90;
+            doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);
+            doc.text(ev.time,mg+4,y);
+            doc.setFont('helvetica','bold');doc.setTextColor(...(isCrit?RED:ORANGE));
+            doc.text(ev.value+'%',mg+22,y);
+            doc.setFont('helvetica','normal');doc.setTextColor(...(isCrit?RED:ORANGE));
+            doc.text(isCrit?'CRÍTICO':'Bajo',mg+36,y);
+            doc.setTextColor(...BORDER);doc.setLineWidth(0.05);doc.line(mg+4,y+1.5,mg+70,y+1.5);
+            y+=5;
           });
         }else{
-          doc.setFontSize(8);doc.setTextColor(...C.mu);
-          doc.text('(abre este día en el dashboard para ver el detalle)',mg+4,y);y+=5.5;
+          doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(...GRAY2);
+          doc.text('Abre este día en el dashboard para ver el detalle hora a hora.',mg+4,y);y+=6;
         }
-        y+=3;
+        y+=4;divider();
       }
     }
 
+    // ── NOTA MÉDICA ────────────────────────────────────────────────────────
     setProgress(95,'Nota médica…');
-    cy(50);stitle('Nota informativa');
-    ['Este informe ha sido generado automáticamente a partir de datos del Apple Watch.',
-     '','Umbrales SpO2:',
-     '  · ≥ 94%      Normal',
-     '  · 90 – 93%   Bajo — seguimiento recomendado',
-     '  · < 90%      Crítico — consultar con médico',
-     '','Eficiencia del sueño > 85%: normal. < 75%: valorar higiene del sueño.',
-     'Frecuencia respiratoria normal en sueño: 12–20 resp/min.',
-     'Perturbaciones respiratorias > 15/hora: indicador de posible apnea del sueño.',
-    ].forEach(l=>{cy(5.5);doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(...C.mu);doc.text(l,mg,y);y+=5.5;});
+    cy(55);sectionTitle('Referencia clínica');
+    const notas=[
+      ['SpO2 (saturación de oxígeno en sangre):',''],
+      ['  ≥ 94%','Normal'],
+      ['  90 – 93%','Bajo — se recomienda seguimiento médico'],
+      ['  < 90%','Crítico — consultar con médico'],
+      ['',''],
+      ['Eficiencia del sueño:',''],
+      ['  > 85%','Normal'],
+      ['  75 – 84%','Mejorable'],
+      ['  < 75%','Baja — valorar higiene del sueño'],
+      ['',''],
+      ['Frecuencia respiratoria durante el sueño: normal 12–20 resp/min.',''],
+      ['Perturbaciones respiratorias > 15/hora: posible indicador de apnea del sueño.',''],
+      ['',''],
+      ['Este informe ha sido generado automáticamente. No sustituye el criterio médico.',''],
+    ];
+    notas.forEach(([lbl,val])=>{
+      cy(5);
+      doc.setFontSize(8.5);doc.setFont('helvetica',lbl.startsWith('  ')?'normal':'bold');
+      doc.setTextColor(...(lbl.startsWith('  ')?GRAY1:BLACK));
+      doc.text(lbl,mg,y);
+      if(val){
+        doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);
+        doc.text(val,mg+45,y);
+      }
+      y+=5;
+    });
 
     setProgress(100,'Guardando…');await new Promise(r=>setTimeout(r,100));
     doc.save(`informe-salud-sacramento-${new Date().toISOString().substring(0,10)}.pdf`);
