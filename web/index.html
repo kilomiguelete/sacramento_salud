@@ -7,7 +7,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
-  /* ─── Variables ─────────────────────────────────────────────────────────── */
   :root {
     --bg:      #0B1220;
     --surface: #121E30;
@@ -27,85 +26,52 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; min-height: 100vh; }
-
-  /* ─── Layout ────────────────────────────────────────────────────────────── */
   .app { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .header h1 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
   .header-sub { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 3px; }
   .btn { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 12px; transition: border-color .2s, color .2s; }
   .btn:hover { border-color: var(--muted); color: var(--text); }
-  .btn-active { border-color: var(--text); color: var(--text); }
-
-  /* ─── Day tabs ──────────────────────────────────────────────────────────── */
   .day-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 20px; scrollbar-width: none; }
   .day-tabs::-webkit-scrollbar { display: none; }
   .day-tab { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 5px 14px; border-radius: 20px; cursor: pointer; font-size: 11px; white-space: nowrap; transition: all .15s; }
-  .day-tab:hover { border-color: var(--muted); }
   .day-tab.active { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
   .day-tab .warn-dot { color: var(--bad); margin-left: 4px; font-size: 10px; }
   .day-tab.active .warn-dot { color: var(--bg); }
-
-  /* ─── Alert ─────────────────────────────────────────────────────────────── */
   .alert { background: rgba(217,64,64,.12); border: 1px solid rgba(217,64,64,.4); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
-  .alert-icon { font-size: 20px; }
   .alert-title { color: var(--bad); font-weight: 600; font-size: 13px; }
   .alert-body { color: var(--muted); font-size: 12px; margin-top: 2px; }
   .hidden { display: none !important; }
-
-  /* ─── Cards grid ────────────────────────────────────────────────────────── */
   .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
   @media (max-width: 600px) { .cards { grid-template-columns: repeat(2, 1fr); } }
   .card { background: var(--surface); border-radius: var(--radius); padding: 14px 16px; border-left: 3px solid var(--border); }
   .card-label { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
   .card-value { font-size: 28px; font-weight: 700; line-height: 1; letter-spacing: -.03em; }
   .card-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
-
-  /* ─── Chart panels ──────────────────────────────────────────────────────── */
   .panel { background: var(--surface); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
   .panel-title { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
   .panel-row { display: grid; grid-template-columns: 1fr 1.5fr; gap: 14px; margin-bottom: 14px; }
   @media (max-width: 640px) { .panel-row { grid-template-columns: 1fr; } }
   .chart-wrap { position: relative; }
-
-  /* ─── Sleep bar ─────────────────────────────────────────────────────────── */
   .sleep-bar { display: flex; border-radius: 6px; overflow: hidden; height: 28px; margin-bottom: 12px; }
-  .sleep-seg { display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: rgba(255,255,255,.8); transition: flex .4s; }
+  .sleep-seg { display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: rgba(255,255,255,.8); }
   .sleep-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
   .sleep-leg-item { display: flex; align-items: center; gap: 5px; }
   .sleep-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
   .sleep-leg-label { font-size: 11px; color: var(--muted); }
   .sleep-leg-val { font-size: 11px; font-weight: 600; }
-
-  /* ─── Loading / Error ───────────────────────────────────────────────────── */
   .loader { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; gap: 16px; }
   .spinner { width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--text); animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .loader-text { color: var(--muted); font-size: 13px; }
   .error-msg { color: var(--bad); text-align: center; padding: 40px; }
-
-  /* ─── Legend pills ──────────────────────────────────────────────────────── */
   .legend { display: flex; gap: 16px; margin-top: 6px; flex-wrap: wrap; }
   .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
   .legend-line { display: inline-block; width: 20px; height: 2px; }
-
-  /* ─── Footer ────────────────────────────────────────────────────────────── */
   .footer { text-align: center; color: var(--muted); font-size: 10px; letter-spacing: .06em; margin-top: 16px; text-transform: uppercase; }
 </style>
 </head>
 <body>
-
-<!-- ─────────────────────────────────────────────────────────────────────────
-     ⚙️  CONFIGURA AQUÍ TUS CREDENCIALES DE SUPABASE
-     Encuéntralas en: Supabase Dashboard > Settings > API
-─────────────────────────────────────────────────────────────────────────── -->
-<script>
-  const  const SUPABASE_URL  = 'https://pyupnzburpgkakemzjtj.supabase.co';   // ← tu Project URL
-  const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5dXBuemJ1cnBna2FrZW16anRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDg4MTksImV4cCI6MjA5Njk4NDgxOX0.fMwEnjI01SUVXpIwpPQcjSYE2jgVix6aJvHgtPxvXWg';                      // ← tu anon/public key
-</script>
-<!-- ─────────────────────────────────────────────────────────────────────────
-     Fin configuración
-─────────────────────────────────────────────────────────────────────────── -->
 
 <div class="app">
   <div class="header">
@@ -113,19 +79,19 @@
       <div class="header-sub">Apple Watch · Sacramento</div>
       <h1>Dashboard de salud</h1>
     </div>
-    <button class="btn" id="refreshBtn" onclick="init()">↺ Actualizar</button>
+    <button class="btn" onclick="init()">↺ Actualizar</button>
   </div>
 
   <div id="loader" class="loader">
     <div class="spinner"></div>
-    <div class="loader-text" id="loaderText">Cargando datos…</div>
+    <div class="loader-text">Cargando datos…</div>
   </div>
 
   <div id="content" class="hidden">
     <div class="day-tabs" id="dayTabs"></div>
 
     <div id="alertBanner" class="alert hidden">
-      <div class="alert-icon">⚠️</div>
+      <div style="font-size:20px">⚠️</div>
       <div>
         <div class="alert-title">Caída crítica de SpO2 detectada</div>
         <div class="alert-body" id="alertText"></div>
@@ -155,7 +121,6 @@
       </div>
     </div>
 
-    <!-- SpO2 nocturno -->
     <div class="panel">
       <div class="panel-title" id="spo2Title">SpO2 nocturno</div>
       <div class="legend">
@@ -167,7 +132,6 @@
       </div>
     </div>
 
-    <!-- Fases del sueño + SpO2 tendencia -->
     <div class="panel-row">
       <div class="panel">
         <div class="panel-title">Fases del sueño</div>
@@ -182,7 +146,6 @@
       </div>
     </div>
 
-    <!-- Tendencia semanal -->
     <div class="panel">
       <div class="panel-title">Tendencia — sueño y perturbaciones</div>
       <div class="chart-wrap" style="height:150px">
@@ -197,16 +160,18 @@
 </div>
 
 <script>
-// ─── Init Supabase ────────────────────────────────────────────────────────────
-  const SUPABASE_URL  = 'https://pyupnzburpgkakemzjtj.supabase.co';   // ← tu Project URL
-  const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5dXBuemJ1cnBna2FrZW16anRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDg4MTksImV4cCI6MjA5Njk4NDgxOX0.fMwEnjI01SUVXpIwpPQcjSYE2jgVix6aJvHgtPxvXWg';                      // ← tu anon/public key
-// ─── State ────────────────────────────────────────────────────────────────────
-let allDays = [];   // array of date strings, sorted asc
-let dayData  = {};  // { date: { spo2, sleep, vitals } }
-let charts   = {};
-let selectedDate = null;
+// ══════════════════════════════════════════════════════
+//  CREDENCIALES — solo editar estas dos líneas
+// ══════════════════════════════════════════════════════
+const SUPABASE_URL  = 'https://pyupnzburpgkakemzjtj.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5dXBuemJ1cnBna2FrZW16anRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDg4MTksImV4cCI6MjA5Njk4NDgxOX0.fMwEnjI01SUVXpIwpPQcjSYE2jgVix6aJvHgtPxvXWg';
+// ══════════════════════════════════════════════════════
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+let allDays = [], dayData = {}, charts = {}, selectedDate = null;
+
 function fmtH(h) {
   if (h == null) return '–';
   const hrs = Math.floor(h), m = Math.round((h - hrs) * 60);
@@ -218,7 +183,7 @@ function fmtDate(d, short) {
   return dt.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 function spo2Color(v) {
-  if (v == null) return getComputedStyle(document.documentElement).getPropertyValue('--good').trim();
+  if (v == null) return '#1D9E75';
   if (v < 90) return '#D94040';
   if (v < 94) return '#C98B0A';
   return '#1D9E75';
@@ -227,7 +192,6 @@ function destroyChart(key) {
   if (charts[key]) { charts[key].destroy(); delete charts[key]; }
 }
 
-// ─── Data loading ─────────────────────────────────────────────────────────────
 async function loadData() {
   const since = new Date();
   since.setDate(since.getDate() - 30);
@@ -241,45 +205,29 @@ async function loadData() {
 
   if (spo2Res.error) throw spo2Res.error;
 
-  // Group SpO2 by date
   const spo2ByDate = {};
   for (const r of spo2Res.data || []) {
     if (!spo2ByDate[r.date]) spo2ByDate[r.date] = [];
-    const t = r.measured_at.substring(11, 16);
-    spo2ByDate[r.date].push({ time: t, value: parseFloat(r.value) });
+    spo2ByDate[r.date].push({ time: r.measured_at.substring(11, 16), value: parseFloat(r.value) });
   }
-
   const sleepByDate = {};
   for (const r of sleepRes.data || []) sleepByDate[r.date] = r;
-
   const vitalsByDate = {};
   for (const r of vitalsRes.data || []) vitalsByDate[r.date] = r;
 
-  // Collect all dates with any data
-  const dates = new Set([
-    ...Object.keys(spo2ByDate),
-    ...Object.keys(sleepByDate),
-    ...Object.keys(vitalsByDate),
-  ]);
-
+  const dates = new Set([...Object.keys(spo2ByDate), ...Object.keys(sleepByDate), ...Object.keys(vitalsByDate)]);
   allDays = [...dates].sort();
   dayData = {};
   for (const d of allDays) {
-    dayData[d] = {
-      spo2:   spo2ByDate[d]   || [],
-      sleep:  sleepByDate[d]  || null,
-      vitals: vitalsByDate[d] || null,
-    };
+    dayData[d] = { spo2: spo2ByDate[d] || [], sleep: sleepByDate[d] || null, vitals: vitalsByDate[d] || null };
   }
 }
 
-// ─── Render ───────────────────────────────────────────────────────────────────
 function renderTabs() {
   const el = document.getElementById('dayTabs');
   el.innerHTML = '';
   allDays.slice(-14).forEach(d => {
-    const dp = dayData[d];
-    const sp = dp.spo2.map(p => p.value);
+    const sp = dayData[d].spo2.map(p => p.value);
     const mn = sp.length ? Math.min(...sp) : 100;
     const btn = document.createElement('button');
     btn.className = 'day-tab' + (d === selectedDate ? ' active' : '');
@@ -291,66 +239,63 @@ function renderTabs() {
 }
 
 function renderDay() {
-  const dp = dayData[selectedDate];
-  if (!dp) return;
-  const { spo2, sleep, vitals } = dp;
-
-  // Alert
-  const spo2Vals = spo2.map(p => p.value);
+  const { spo2, sleep, vitals } = dayData[selectedDate] || {};
+  const spo2Vals = (spo2 || []).map(p => p.value);
   const minSpo2  = spo2Vals.length ? Math.min(...spo2Vals) : null;
   const avgSpo2  = spo2Vals.length ? Math.round(spo2Vals.reduce((a, b) => a + b, 0) / spo2Vals.length) : null;
-  const alert    = document.getElementById('alertBanner');
+
+  const alertEl = document.getElementById('alertBanner');
   if (minSpo2 != null && minSpo2 < 90) {
-    alert.classList.remove('hidden');
-    document.getElementById('alertText').textContent =
-      `Mínimo registrado: ${minSpo2}% · Consulta a tu médico si se repite.`;
+    alertEl.classList.remove('hidden');
+    document.getElementById('alertText').textContent = `Mínimo registrado: ${minSpo2}% · Consulta a tu médico si se repite.`;
   } else {
-    alert.classList.add('hidden');
+    alertEl.classList.add('hidden');
   }
 
-  // Cards
-  const cardSpo2 = document.getElementById('cardSpo2');
-  cardSpo2.style.borderLeftColor = spo2Color(minSpo2);
+  document.getElementById('cardSpo2').style.borderLeftColor = spo2Color(minSpo2);
   document.getElementById('valSpo2').textContent = minSpo2 != null ? minSpo2 + '%' : '–';
   document.getElementById('valSpo2').style.color = spo2Color(minSpo2);
   document.getElementById('subSpo2').textContent = avgSpo2 != null ? `prom. ${avgSpo2}%` : '–';
 
-  const rhr = vitals?.resting_heart_rate;
-  document.getElementById('valHR').textContent = rhr != null ? rhr + ' bpm' : '–';
-  document.getElementById('subHRV').textContent = vitals?.hrv_avg != null
-    ? `VFC ${Math.round(vitals.hrv_avg)} ms` : '–';
-
+  document.getElementById('valHR').textContent = vitals?.resting_heart_rate != null ? vitals.resting_heart_rate + ' bpm' : '–';
+  document.getElementById('subHRV').textContent = vitals?.hrv_avg != null ? `VFC ${Math.round(vitals.hrv_avg)} ms` : '–';
   document.getElementById('valSleep').textContent = fmtH(sleep?.total_sleep);
-  document.getElementById('subSleep').textContent =
-    sleep?.sleep_start && sleep?.sleep_end
-      ? sleep.sleep_start.substring(11,16) + ' – ' + sleep.sleep_end.substring(11,16)
-      : '–';
+  document.getElementById('subSleep').textContent = sleep?.sleep_start && sleep?.sleep_end
+    ? sleep.sleep_start.substring(11, 16) + ' – ' + sleep.sleep_end.substring(11, 16) : '–';
 
   const bd = vitals?.breathing_disturbances;
-  const cardB = document.getElementById('cardBreathing');
-  cardB.style.borderLeftColor = bd > 10 ? '#C98B0A' : 'var(--border)';
+  document.getElementById('cardBreathing').style.borderLeftColor = bd > 10 ? '#C98B0A' : 'var(--border)';
   document.getElementById('valBreathing').textContent = bd != null ? bd.toFixed(1) : '–';
   document.getElementById('valBreathing').style.color = bd > 10 ? '#C98B0A' : 'var(--text)';
-
-  // SpO2 title
   document.getElementById('spo2Title').textContent = `SpO2 nocturno — ${fmtDate(selectedDate)}`;
 
   // SpO2 chart
   destroyChart('spo2');
-  const ctx = document.getElementById('spo2Chart').getContext('2d');
-  charts.spo2 = new Chart(ctx, {
+  const refLinesPlugin = (id, vals) => ({
+    id,
+    afterDraw(chart) {
+      const { ctx, chartArea: { left, right }, scales: { y } } = chart;
+      vals.forEach(([val, color]) => {
+        const yPos = y.getPixelForValue(val);
+        ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 1;
+        ctx.setLineDash([5, 4]); ctx.globalAlpha = .8;
+        ctx.beginPath(); ctx.moveTo(left, yPos); ctx.lineTo(right, yPos); ctx.stroke();
+        ctx.restore();
+      });
+    }
+  });
+
+  charts.spo2 = new Chart(document.getElementById('spo2Chart'), {
     type: 'line',
     data: {
       labels: spo2.map(p => p.time),
       datasets: [{
-        label: 'SpO2',
-        data: spo2.map(p => p.value),
+        label: 'SpO2', data: spo2.map(p => p.value),
         borderColor: spo2.map(p => spo2Color(p.value)),
         borderWidth: 2,
         pointBackgroundColor: spo2.map(p => spo2Color(p.value)),
         pointRadius: spo2.map(p => p.value < 90 ? 5 : p.value < 94 ? 4 : 3),
-        tension: 0.3,
-        fill: { target: 'origin', above: 'rgba(29,158,117,.08)' },
+        tension: 0.3, fill: { target: 'origin', above: 'rgba(29,158,117,.08)' },
         segment: { borderColor: ctx => spo2Color(ctx.p1.parsed.y) },
       }]
     },
@@ -360,135 +305,67 @@ function renderDay() {
       scales: {
         x: { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } },
         y: { min: 78, max: 100, ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } },
-      },
-      plugins: {
-        legend: { display: false },
-        annotation: { /* needed plugin — we use reference lines via plugin below */ }
       }
     },
-    plugins: [{
-      id: 'refLines',
-      afterDraw(chart) {
-        const { ctx, chartArea: { left, right }, scales: { y } } = chart;
-        [[94, '#C98B0A'], [90, '#D94040']].forEach(([val, color]) => {
-          const yPos = y.getPixelForValue(val);
-          ctx.save();
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([5, 4]);
-          ctx.globalAlpha = .8;
-          ctx.beginPath(); ctx.moveTo(left, yPos); ctx.lineTo(right, yPos); ctx.stroke();
-          ctx.restore();
-        });
-      }
-    }]
+    plugins: [refLinesPlugin('rl1', [[94, '#C98B0A'], [90, '#D94040']])]
   });
 
-  // Sleep stages bar
+  // Sleep bar
   const stages = [
-    { key: 'deep',  label: 'Profundo', color: '#5A48C0', val: sleep?.deep  },
-    { key: 'rem',   label: 'REM',      color: '#1A7A60', val: sleep?.rem   },
-    { key: 'core',  label: 'Ligero',   color: '#2872B8', val: sleep?.core  },
-    { key: 'awake', label: 'Despierto',color: '#3A4A5A', val: sleep?.awake },
+    { label: 'Profundo', color: '#5A48C0', val: sleep?.deep },
+    { label: 'REM',      color: '#1A7A60', val: sleep?.rem  },
+    { label: 'Ligero',   color: '#2872B8', val: sleep?.core },
+    { label: 'Despierto',color: '#3A4A5A', val: sleep?.awake},
   ];
-  const total = stages.reduce((s, st) => s + (st.val || 0), 0);
   const barEl = document.getElementById('sleepBar');
   const legEl = document.getElementById('sleepLegend');
-  barEl.innerHTML = '';
-  legEl.innerHTML = '';
-  stages.filter(st => st.val > 0).forEach(st => {
+  barEl.innerHTML = ''; legEl.innerHTML = '';
+  stages.filter(s => s.val > 0).forEach(s => {
     const seg = document.createElement('div');
     seg.className = 'sleep-seg';
-    seg.style.cssText = `flex:${st.val};background:${st.color}`;
-    seg.textContent = st.val > 0.4 ? fmtH(st.val) : '';
+    seg.style.cssText = `flex:${s.val};background:${s.color}`;
+    seg.textContent = s.val > 0.4 ? fmtH(s.val) : '';
     barEl.appendChild(seg);
   });
-  stages.forEach(st => {
+  stages.forEach(s => {
     const item = document.createElement('div');
     item.className = 'sleep-leg-item';
-    item.innerHTML = `<div class="sleep-dot" style="background:${st.color}"></div><span class="sleep-leg-label">${st.label}</span><span class="sleep-leg-val">${fmtH(st.val)}</span>`;
+    item.innerHTML = `<div class="sleep-dot" style="background:${s.color}"></div><span class="sleep-leg-label">${s.label}</span><span class="sleep-leg-val">${fmtH(s.val)}</span>`;
     legEl.appendChild(item);
   });
 
-  // 7-day SpO2 trend
+  // SpO2 trend
   const recentDays = allDays.slice(-14);
-  const spo2Trend = recentDays.map(d => {
-    const v = (dayData[d]?.spo2 || []).map(p => p.value);
-    return v.length ? Math.min(...v) : null;
-  });
-
+  const spo2Trend = recentDays.map(d => { const v = (dayData[d]?.spo2||[]).map(p=>p.value); return v.length?Math.min(...v):null; });
   destroyChart('spo2Trend');
   document.getElementById('spo2TrendTitle').textContent = `SpO2 mínimo — últimos ${recentDays.length} días`;
-  const ctxT = document.getElementById('spo2TrendChart').getContext('2d');
-  charts.spo2Trend = new Chart(ctxT, {
+  charts.spo2Trend = new Chart(document.getElementById('spo2TrendChart'), {
     type: 'bar',
     data: {
       labels: recentDays.map(d => fmtDate(d, true)),
-      datasets: [{
-        label: 'SpO2 mín',
-        data: spo2Trend,
-        backgroundColor: spo2Trend.map(v => spo2Color(v) + 'CC'),
-        borderColor: spo2Trend.map(v => spo2Color(v)),
-        borderWidth: 1,
-        borderRadius: 4,
-      }]
+      datasets: [{ label: 'SpO2 mín', data: spo2Trend, backgroundColor: spo2Trend.map(v => spo2Color(v)+'CC'), borderColor: spo2Trend.map(v => spo2Color(v)), borderWidth: 1, borderRadius: 4 }]
     },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { display: false } },
-        y: { min: 75, max: 100, ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } },
-      }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { display: false } }, y: { min: 75, max: 100, ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } } }
     },
-    plugins: [{
-      id: 'refLines2',
-      afterDraw(chart) {
-        const { ctx, chartArea: { left, right }, scales: { y } } = chart;
-        [[94, '#C98B0A'], [90, '#D94040']].forEach(([val, color]) => {
-          const yPos = y.getPixelForValue(val);
-          ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 1;
-          ctx.setLineDash([4, 3]); ctx.globalAlpha = .7;
-          ctx.beginPath(); ctx.moveTo(left, yPos); ctx.lineTo(right, yPos); ctx.stroke();
-          ctx.restore();
-        });
-      }
-    }]
+    plugins: [refLinesPlugin('rl2', [[94, '#C98B0A'], [90, '#D94040']])]
   });
 
-  // Weekly trend — sleep + breathing
+  // Weekly trend
   destroyChart('trend');
-  const trendDays   = allDays.slice(-14);
-  const trendSleep  = trendDays.map(d => dayData[d]?.sleep?.total_sleep ?? null);
-  const trendBreath = trendDays.map(d => dayData[d]?.vitals?.breathing_disturbances ?? null);
-  const ctxW = document.getElementById('trendChart').getContext('2d');
-  charts.trend = new Chart(ctxW, {
+  const trendDays = allDays.slice(-14);
+  charts.trend = new Chart(document.getElementById('trendChart'), {
     type: 'bar',
     data: {
       labels: trendDays.map(d => fmtDate(d, true)),
       datasets: [
-        {
-          type: 'bar', label: 'Sueño (h)',
-          data: trendSleep,
-          backgroundColor: '#7A6EE880', borderRadius: 3, yAxisID: 'y',
-        },
-        {
-          type: 'line', label: 'Perturbaciones',
-          data: trendBreath,
-          borderColor: '#C98B0A', borderWidth: 2,
-          pointBackgroundColor: '#C98B0A', pointRadius: 3,
-          tension: 0.3, yAxisID: 'y2',
-        }
+        { type: 'bar',  label: 'Sueño (h)',     data: trendDays.map(d => dayData[d]?.sleep?.total_sleep??null),               backgroundColor: '#7A6EE880', borderRadius: 3, yAxisID: 'y'  },
+        { type: 'line', label: 'Perturbaciones', data: trendDays.map(d => dayData[d]?.vitals?.breathing_disturbances??null), borderColor: '#C98B0A', borderWidth: 2, pointBackgroundColor: '#C98B0A', pointRadius: 3, tension: 0.3, yAxisID: 'y2' }
       ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          display: true,
-          labels: { color: '#6B8BAD', font: { size: 11 }, boxWidth: 12, boxHeight: 2 }
-        }
-      },
+      plugins: { legend: { display: true, labels: { color: '#6B8BAD', font: { size: 11 }, boxWidth: 12, boxHeight: 2 } } },
       scales: {
         x:  { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { display: false } },
         y:  { position: 'left',  ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } },
@@ -497,37 +374,30 @@ function renderDay() {
     }
   });
 
-  // Footer
   document.getElementById('footer').textContent =
     `Apple Watch de Sacramento · actualizado ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-// ─── Main init ────────────────────────────────────────────────────────────────
 async function init() {
   document.getElementById('content').classList.add('hidden');
   document.getElementById('errorDiv').classList.add('hidden');
   document.getElementById('loader').classList.remove('hidden');
-
   try {
     await loadData();
     document.getElementById('loader').classList.add('hidden');
-    document.getElementById('content').classList.remove('hidden');
-
     if (!allDays.length) {
       document.getElementById('errorDiv').classList.remove('hidden');
-      document.getElementById('errorDiv').textContent = 'No hay datos todavía. Configura HealthAutoExport Pro y envía el primer JSON.';
-      document.getElementById('content').classList.add('hidden');
+      document.getElementById('errorDiv').textContent = 'No hay datos todavía.';
       return;
     }
-
+    document.getElementById('content').classList.remove('hidden');
     selectedDate = allDays[allDays.length - 1];
     renderTabs();
     renderDay();
   } catch (err) {
     document.getElementById('loader').classList.add('hidden');
     document.getElementById('errorDiv').classList.remove('hidden');
-    document.getElementById('errorDiv').textContent =
-      'Error cargando datos: ' + err.message + ' · Revisa las credenciales de Supabase.';
+    document.getElementById('errorDiv').textContent = 'Error: ' + err.message;
   }
 }
 
