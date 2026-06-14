@@ -121,17 +121,31 @@
       </div>
     </div>
 
+    <!-- SpO2 -->
     <div class="panel">
       <div class="panel-title" id="spo2Title">SpO2 nocturno</div>
       <div class="legend">
         <div class="legend-item"><span class="legend-line" style="background:var(--warn)"></span>94% umbral bajo</div>
         <div class="legend-item"><span class="legend-line" style="background:var(--bad)"></span>90% umbral crítico</div>
       </div>
-      <div class="chart-wrap" style="height:200px;margin-top:12px">
+      <div class="chart-wrap" style="height:180px;margin-top:12px">
         <canvas id="spo2Chart"></canvas>
       </div>
     </div>
 
+    <!-- FC -->
+    <div class="panel">
+      <div class="panel-title" id="hrTitle">Frecuencia cardíaca nocturna</div>
+      <div class="legend">
+        <div class="legend-item"><span class="legend-line" style="background:#C25880"></span>FC media</div>
+        <div class="legend-item"><span class="legend-line" style="background:#C2588040;height:8px;border-radius:2px"></span>Rango min–max</div>
+      </div>
+      <div class="chart-wrap" style="height:180px;margin-top:12px">
+        <canvas id="hrChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Fases del sueño + SpO2 tendencia -->
     <div class="panel-row">
       <div class="panel">
         <div class="panel-title">Fases del sueño</div>
@@ -146,6 +160,7 @@
       </div>
     </div>
 
+    <!-- Tendencia semanal -->
     <div class="panel">
       <div class="panel-title">Tendencia — sueño y perturbaciones</div>
       <div class="chart-wrap" style="height:150px">
@@ -161,7 +176,7 @@
 
 <script>
 // ══════════════════════════════════════════════════════
-//  CREDENCIALES — solo editar estas dos líneas
+//  CREDENCIALES
 // ══════════════════════════════════════════════════════
 const SUPABASE_URL  = 'https://pyupnzburpgkakemzjtj.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5dXBuemJ1cnBna2FrZW16anRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDg4MTksImV4cCI6MjA5Njk4NDgxOX0.fMwEnjI01SUVXpIwpPQcjSYE2jgVix6aJvHgtPxvXWg';
@@ -192,15 +207,31 @@ function destroyChart(key) {
   if (charts[key]) { charts[key].destroy(); delete charts[key]; }
 }
 
+const refLinesPlugin = (id, vals) => ({
+  id,
+  afterDraw(chart) {
+    const { ctx, chartArea: { left, right }, scales: { y } } = chart;
+    vals.forEach(([val, color, label]) => {
+      const yPos = y.getPixelForValue(val);
+      ctx.save();
+      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      ctx.setLineDash([5, 4]); ctx.globalAlpha = .8;
+      ctx.beginPath(); ctx.moveTo(left, yPos); ctx.lineTo(right, yPos); ctx.stroke();
+      ctx.restore();
+    });
+  }
+});
+
 async function loadData() {
   const since = new Date();
   since.setDate(since.getDate() - 30);
   const sinceStr = since.toISOString().substring(0, 10);
 
-  const [spo2Res, sleepRes, vitalsRes] = await Promise.all([
+  const [spo2Res, sleepRes, vitalsRes, hrRes] = await Promise.all([
     db.from('spo2_readings').select('date,measured_at,value').gte('date', sinceStr).order('measured_at'),
     db.from('sleep_analysis').select('*').gte('date', sinceStr).order('date'),
     db.from('daily_vitals').select('*').gte('date', sinceStr).order('date'),
+    db.from('heart_rate_readings').select('date,measured_at,min_hr,max_hr,avg_hr').gte('date', sinceStr).order('measured_at'),
   ]);
 
   if (spo2Res.error) throw spo2Res.error;
@@ -210,6 +241,18 @@ async function loadData() {
     if (!spo2ByDate[r.date]) spo2ByDate[r.date] = [];
     spo2ByDate[r.date].push({ time: r.measured_at.substring(11, 16), value: parseFloat(r.value) });
   }
+
+  const hrByDate = {};
+  for (const r of hrRes.data || []) {
+    if (!hrByDate[r.date]) hrByDate[r.date] = [];
+    hrByDate[r.date].push({
+      time: r.measured_at.substring(11, 16),
+      min: r.min_hr != null ? parseFloat(r.min_hr) : null,
+      max: r.max_hr != null ? parseFloat(r.max_hr) : null,
+      avg: r.avg_hr != null ? parseFloat(r.avg_hr) : null,
+    });
+  }
+
   const sleepByDate = {};
   for (const r of sleepRes.data || []) sleepByDate[r.date] = r;
   const vitalsByDate = {};
@@ -219,7 +262,12 @@ async function loadData() {
   allDays = [...dates].sort();
   dayData = {};
   for (const d of allDays) {
-    dayData[d] = { spo2: spo2ByDate[d] || [], sleep: sleepByDate[d] || null, vitals: vitalsByDate[d] || null };
+    dayData[d] = {
+      spo2:   spo2ByDate[d]   || [],
+      hr:     hrByDate[d]     || [],
+      sleep:  sleepByDate[d]  || null,
+      vitals: vitalsByDate[d] || null,
+    };
   }
 }
 
@@ -239,12 +287,13 @@ function renderTabs() {
 }
 
 function renderDay() {
-  const { spo2, sleep, vitals } = dayData[selectedDate] || {};
+  const { spo2, hr, sleep, vitals } = dayData[selectedDate] || {};
+
+  // Alert
   const spo2Vals = (spo2 || []).map(p => p.value);
   const minSpo2  = spo2Vals.length ? Math.min(...spo2Vals) : null;
   const avgSpo2  = spo2Vals.length ? Math.round(spo2Vals.reduce((a, b) => a + b, 0) / spo2Vals.length) : null;
-
-  const alertEl = document.getElementById('alertBanner');
+  const alertEl  = document.getElementById('alertBanner');
   if (minSpo2 != null && minSpo2 < 90) {
     alertEl.classList.remove('hidden');
     document.getElementById('alertText').textContent = `Mínimo registrado: ${minSpo2}% · Consulta a tu médico si se repite.`;
@@ -252,39 +301,27 @@ function renderDay() {
     alertEl.classList.add('hidden');
   }
 
+  // Cards
   document.getElementById('cardSpo2').style.borderLeftColor = spo2Color(minSpo2);
   document.getElementById('valSpo2').textContent = minSpo2 != null ? minSpo2 + '%' : '–';
   document.getElementById('valSpo2').style.color = spo2Color(minSpo2);
   document.getElementById('subSpo2').textContent = avgSpo2 != null ? `prom. ${avgSpo2}%` : '–';
-
   document.getElementById('valHR').textContent = vitals?.resting_heart_rate != null ? vitals.resting_heart_rate + ' bpm' : '–';
   document.getElementById('subHRV').textContent = vitals?.hrv_avg != null ? `VFC ${Math.round(vitals.hrv_avg)} ms` : '–';
   document.getElementById('valSleep').textContent = fmtH(sleep?.total_sleep);
   document.getElementById('subSleep').textContent = sleep?.sleep_start && sleep?.sleep_end
     ? sleep.sleep_start.substring(11, 16) + ' – ' + sleep.sleep_end.substring(11, 16) : '–';
-
   const bd = vitals?.breathing_disturbances;
   document.getElementById('cardBreathing').style.borderLeftColor = bd > 10 ? '#C98B0A' : 'var(--border)';
   document.getElementById('valBreathing').textContent = bd != null ? bd.toFixed(1) : '–';
   document.getElementById('valBreathing').style.color = bd > 10 ? '#C98B0A' : 'var(--text)';
-  document.getElementById('spo2Title').textContent = `SpO2 nocturno — ${fmtDate(selectedDate)}`;
 
-  // SpO2 chart
+  const dateLabel = fmtDate(selectedDate);
+  document.getElementById('spo2Title').textContent = `SpO2 nocturno — ${dateLabel}`;
+  document.getElementById('hrTitle').textContent   = `Frecuencia cardíaca nocturna — ${dateLabel}`;
+
+  // ── SpO2 chart ────────────────────────────────────────────────────────────
   destroyChart('spo2');
-  const refLinesPlugin = (id, vals) => ({
-    id,
-    afterDraw(chart) {
-      const { ctx, chartArea: { left, right }, scales: { y } } = chart;
-      vals.forEach(([val, color]) => {
-        const yPos = y.getPixelForValue(val);
-        ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 1;
-        ctx.setLineDash([5, 4]); ctx.globalAlpha = .8;
-        ctx.beginPath(); ctx.moveTo(left, yPos); ctx.lineTo(right, yPos); ctx.stroke();
-        ctx.restore();
-      });
-    }
-  });
-
   charts.spo2 = new Chart(document.getElementById('spo2Chart'), {
     type: 'line',
     data: {
@@ -295,27 +332,102 @@ function renderDay() {
         borderWidth: 2,
         pointBackgroundColor: spo2.map(p => spo2Color(p.value)),
         pointRadius: spo2.map(p => p.value < 90 ? 5 : p.value < 94 ? 4 : 3),
-        tension: 0.3, fill: { target: 'origin', above: 'rgba(29,158,117,.08)' },
+        tension: 0.3,
+        fill: { target: 'origin', above: 'rgba(29,158,117,.08)' },
         segment: { borderColor: ctx => spo2Color(ctx.p1.parsed.y) },
       }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `SpO2: ${ctx.parsed.y}%` } } },
       scales: {
         x: { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } },
-        y: { min: 78, max: 100, ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } },
+        y: { min: 78, max: 100, ticks: { color: '#6B8BAD', font: { size: 10 }, callback: v => v + '%' }, grid: { color: '#1E3048' } },
       }
     },
     plugins: [refLinesPlugin('rl1', [[94, '#C98B0A'], [90, '#D94040']])]
   });
 
-  // Sleep bar
+  // ── FC chart ──────────────────────────────────────────────────────────────
+  destroyChart('hr');
+  if (hr && hr.length) {
+    const hrAvgs = hr.map(p => p.avg);
+    const hrMins = hr.map(p => p.min);
+    const hrMaxs = hr.map(p => p.max);
+    charts.hr = new Chart(document.getElementById('hrChart'), {
+      type: 'line',
+      data: {
+        labels: hr.map(p => p.time),
+        datasets: [
+          // Rango max (invisible, solo para fill)
+          {
+            label: 'FC máx',
+            data: hrMaxs,
+            borderColor: 'transparent',
+            pointRadius: 0,
+            fill: '+1',
+            backgroundColor: 'rgba(194,88,128,0.15)',
+            tension: 0.3,
+          },
+          // Rango min (invisible)
+          {
+            label: 'FC mín',
+            data: hrMins,
+            borderColor: 'transparent',
+            pointRadius: 0,
+            fill: false,
+            tension: 0.3,
+          },
+          // Media
+          {
+            label: 'FC media',
+            data: hrAvgs,
+            borderColor: '#C25880',
+            borderWidth: 2,
+            pointBackgroundColor: '#C25880',
+            pointRadius: 2,
+            tension: 0.3,
+            fill: false,
+          },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                if (ctx.datasetIndex === 2) return `FC media: ${Math.round(ctx.parsed.y)} bpm`;
+                if (ctx.datasetIndex === 0) return `FC máx: ${Math.round(ctx.parsed.y)} bpm`;
+                if (ctx.datasetIndex === 1) return `FC mín: ${Math.round(ctx.parsed.y)} bpm`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } },
+          y: { ticks: { color: '#6B8BAD', font: { size: 10 }, callback: v => v + ' bpm' }, grid: { color: '#1E3048' } },
+        }
+      }
+    });
+  } else {
+    // No HR data — show message on canvas
+    const canvas = document.getElementById('hrChart');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#6B8BAD';
+    ctx.font = '13px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('Sin datos de FC para este día', canvas.width / 2, 80);
+  }
+
+  // ── Sleep bar ─────────────────────────────────────────────────────────────
   const stages = [
-    { label: 'Profundo', color: '#5A48C0', val: sleep?.deep },
-    { label: 'REM',      color: '#1A7A60', val: sleep?.rem  },
-    { label: 'Ligero',   color: '#2872B8', val: sleep?.core },
-    { label: 'Despierto',color: '#3A4A5A', val: sleep?.awake},
+    { label: 'Profundo',  color: '#5A48C0', val: sleep?.deep  },
+    { label: 'REM',       color: '#1A7A60', val: sleep?.rem   },
+    { label: 'Ligero',    color: '#2872B8', val: sleep?.core  },
+    { label: 'Despierto', color: '#3A4A5A', val: sleep?.awake },
   ];
   const barEl = document.getElementById('sleepBar');
   const legEl = document.getElementById('sleepLegend');
@@ -334,9 +446,9 @@ function renderDay() {
     legEl.appendChild(item);
   });
 
-  // SpO2 trend
+  // ── SpO2 trend ────────────────────────────────────────────────────────────
   const recentDays = allDays.slice(-14);
-  const spo2Trend = recentDays.map(d => { const v = (dayData[d]?.spo2||[]).map(p=>p.value); return v.length?Math.min(...v):null; });
+  const spo2Trend = recentDays.map(d => { const v = (dayData[d]?.spo2||[]).map(p=>p.value); return v.length ? Math.min(...v) : null; });
   destroyChart('spo2Trend');
   document.getElementById('spo2TrendTitle').textContent = `SpO2 mínimo — últimos ${recentDays.length} días`;
   charts.spo2Trend = new Chart(document.getElementById('spo2TrendChart'), {
@@ -345,13 +457,17 @@ function renderDay() {
       labels: recentDays.map(d => fmtDate(d, true)),
       datasets: [{ label: 'SpO2 mín', data: spo2Trend, backgroundColor: spo2Trend.map(v => spo2Color(v)+'CC'), borderColor: spo2Trend.map(v => spo2Color(v)), borderWidth: 1, borderRadius: 4 }]
     },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-      scales: { x: { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { display: false } }, y: { min: 75, max: 100, ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } } }
+    options: {
+      responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { display: false } },
+        y: { min: 75, max: 100, ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } }
+      }
     },
     plugins: [refLinesPlugin('rl2', [[94, '#C98B0A'], [90, '#D94040']])]
   });
 
-  // Weekly trend
+  // ── Weekly trend ──────────────────────────────────────────────────────────
   destroyChart('trend');
   const trendDays = allDays.slice(-14);
   charts.trend = new Chart(document.getElementById('trendChart'), {
@@ -359,8 +475,8 @@ function renderDay() {
     data: {
       labels: trendDays.map(d => fmtDate(d, true)),
       datasets: [
-        { type: 'bar',  label: 'Sueño (h)',     data: trendDays.map(d => dayData[d]?.sleep?.total_sleep??null),               backgroundColor: '#7A6EE880', borderRadius: 3, yAxisID: 'y'  },
-        { type: 'line', label: 'Perturbaciones', data: trendDays.map(d => dayData[d]?.vitals?.breathing_disturbances??null), borderColor: '#C98B0A', borderWidth: 2, pointBackgroundColor: '#C98B0A', pointRadius: 3, tension: 0.3, yAxisID: 'y2' }
+        { type: 'bar',  label: 'Sueño (h)',     data: trendDays.map(d => dayData[d]?.sleep?.total_sleep ?? null),               backgroundColor: '#7A6EE880', borderRadius: 3, yAxisID: 'y'  },
+        { type: 'line', label: 'Perturbaciones', data: trendDays.map(d => dayData[d]?.vitals?.breathing_disturbances ?? null), borderColor: '#C98B0A', borderWidth: 2, pointBackgroundColor: '#C98B0A', pointRadius: 3, tension: 0.3, yAxisID: 'y2' }
       ]
     },
     options: {
