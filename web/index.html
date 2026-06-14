@@ -198,9 +198,8 @@
 
 <script>
 // ─── Init Supabase ────────────────────────────────────────────────────────────
-const { createClient } = supabase;
-const db = createClient(SUPABASE_URL, SUPABASE_ANON);
-
+  const SUPABASE_URL  = 'https://pyupnzburpgkakemzjtj.supabase.co';   // ← tu Project URL
+  const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5dXBuemJ1cnBna2FrZW16anRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDg4MTksImV4cCI6MjA5Njk4NDgxOX0.fMwEnjI01SUVXpIwpPQcjSYE2jgVix6aJvHgtPxvXWg';                      // ← tu anon/public key
 // ─── State ────────────────────────────────────────────────────────────────────
 let allDays = [];   // array of date strings, sorted asc
 let dayData  = {};  // { date: { spo2, sleep, vitals } }
