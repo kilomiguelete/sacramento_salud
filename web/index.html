@@ -321,7 +321,7 @@ async function loadSummaries(){
   const[sleepRes,vitalsRes,spo2Res]=await Promise.all([
     db.from('sleep_analysis').select('date,total_sleep,deep,rem,core,awake,in_bed,sleep_start,sleep_end').order('date'),
     db.from('daily_vitals').select('date,resting_heart_rate,hrv_avg,breathing_disturbances,respiratory_rate_avg,wrist_temperature').order('date'),
-    db.from('spo2_readings').select('date,value').order('date'),
+    db.from('spo2_readings').select('date,value').order('date').limit(100000),
   ]);
   if(sleepRes.error)throw sleepRes.error;
 
@@ -393,7 +393,7 @@ function renderDays(){
     const btn=document.createElement('button');
     btn.className='day-pill'+(ds===selectedDate?' active':'')+(!has?' no-data':'');
     btn.innerHTML=`<span class="day-wd">${dayWd(ds)}</span><span class="day-num">${d}</span><span class="day-dot" style="background:${has?sc(s?.spo2_min):'#1E3048'}"></span>`;
-    if(has)btn.onclick=()=>selectDay(ds);
+    if(has){btn.onclick=()=>selectDay(ds);btn.ondblclick=()=>selectDay(ds,true);}
     el.appendChild(btn);
   }
   el.querySelector('.active')?.scrollIntoView({inline:'center',block:'nearest'});
@@ -407,10 +407,11 @@ function selectMonth(m){
   renderMonths();renderDays();
   if(selectedDate)renderDay();
 }
-async function selectDay(date){
+async function selectDay(date, force=false){
   selectedDate=date;
   const nm=date.substring(0,7);
   if(nm!==selectedMonth){selectedMonth=nm;renderMonths();}
+  if(force) delete dayDetail[date];
   renderDays();await renderDay();
 }
 function prevDay(){const i=allDays.indexOf(selectedDate);if(i>0)selectDay(allDays[i-1]);}
@@ -455,7 +456,8 @@ async function renderDay(){
   document.getElementById('subHRV').textContent=vitals?.hrv_avg!=null?`VFC ${Math.round(vitals.hrv_avg)} ms`:'–';
 
   // Eficiencia del sueño
-  const eff=sleep?.total_sleep&&sleep?.in_bed&&sleep.in_bed>0?Math.round((sleep.total_sleep/sleep.in_bed)*100):null;
+  const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
+  const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
   document.getElementById('valEfficiency').textContent=eff!=null?eff+'%':'–';
   document.getElementById('valEfficiency').style.color=eff!=null?(eff>=85?'var(--good)':eff>=75?'#C98B0A':'#D94040'):'var(--muted)';
   document.getElementById('subEfficiency').textContent=eff!=null?(eff>=85?'Buena':'Mejorable'):'–';
@@ -625,7 +627,8 @@ async function generatePDF(){
       const{sleep,vitals,spo2_min,spo2_avg,ev94}=s;
       const isCrit=spo2_min!=null&&spo2_min<90,isWarn=spo2_min!=null&&spo2_min<94;
       if(isCrit){doc.setFillColor(217,64,64,0.08);doc.rect(mg,y-4,cW,6.5,'F');}
-      const eff=sleep?.total_sleep&&sleep?.in_bed&&sleep.in_bed>0?Math.round((sleep.total_sleep/sleep.in_bed)*100):null;
+      const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
+  const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
       doc.setFontSize(8);doc.setFont('helvetica',isCrit?'bold':'normal');doc.setTextColor(...(isCrit?C.ba:isWarn?C.wa:C.tx));
       doc.text(fmtDateMed(d).substring(0,22),mg+cols[0],y);
       doc.setFont('helvetica','bold');doc.setTextColor(...(isCrit?C.ba:isWarn?C.wa:C.tx));
