@@ -6,6 +6,7 @@
 <title>Sacramento Salud</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
     --bg:      #0B1220;
@@ -18,10 +19,6 @@
     --bad:     #D94040;
     --purple:  #7A6EE8;
     --pink:    #C25880;
-    --deep:    #5A48C0;
-    --rem:     #1A7A60;
-    --core:    #2872B8;
-    --awake:   #3A4A5A;
     --radius:  12px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -30,8 +27,11 @@
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .header h1 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
   .header-sub { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 3px; }
-  .btn { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 12px; transition: border-color .2s, color .2s; }
+  .header-actions { display: flex; gap: 8px; }
+  .btn { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 12px; transition: all .2s; }
   .btn:hover { border-color: var(--muted); color: var(--text); }
+  .btn-pdf { border-color: #C98B0A55; color: #C98B0A; }
+  .btn-pdf:hover { border-color: #C98B0A; background: #C98B0A15; color: #C98B0A; }
   .day-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 20px; scrollbar-width: none; }
   .day-tabs::-webkit-scrollbar { display: none; }
   .day-tab { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 5px 14px; border-radius: 20px; cursor: pointer; font-size: 11px; white-space: nowrap; transition: all .15s; }
@@ -52,7 +52,6 @@
   .panel-title { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
   .panel-row { display: grid; grid-template-columns: 1fr 1.5fr; gap: 14px; margin-bottom: 14px; }
   @media (max-width: 640px) { .panel-row { grid-template-columns: 1fr; } }
-  .chart-wrap { position: relative; }
   .sleep-bar { display: flex; border-radius: 6px; overflow: hidden; height: 28px; margin-bottom: 12px; }
   .sleep-seg { display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: rgba(255,255,255,.8); }
   .sleep-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
@@ -72,14 +71,16 @@
 </style>
 </head>
 <body>
-
 <div class="app">
   <div class="header">
     <div>
       <div class="header-sub">Apple Watch · Sacramento</div>
       <h1>Dashboard de salud</h1>
     </div>
-    <button class="btn" onclick="init()">↺ Actualizar</button>
+    <div class="header-actions">
+      <button class="btn btn-pdf" onclick="exportPDF()">↓ Exportar PDF</button>
+      <button class="btn" onclick="init()">↺ Actualizar</button>
+    </div>
   </div>
 
   <div id="loader" class="loader">
@@ -121,31 +122,24 @@
       </div>
     </div>
 
-    <!-- SpO2 -->
     <div class="panel">
       <div class="panel-title" id="spo2Title">SpO2 nocturno</div>
       <div class="legend">
         <div class="legend-item"><span class="legend-line" style="background:var(--warn)"></span>94% umbral bajo</div>
         <div class="legend-item"><span class="legend-line" style="background:var(--bad)"></span>90% umbral crítico</div>
       </div>
-      <div class="chart-wrap" style="height:180px;margin-top:12px">
-        <canvas id="spo2Chart"></canvas>
-      </div>
+      <div style="height:180px;margin-top:12px;position:relative"><canvas id="spo2Chart"></canvas></div>
     </div>
 
-    <!-- FC -->
     <div class="panel">
       <div class="panel-title" id="hrTitle">Frecuencia cardíaca nocturna</div>
       <div class="legend">
         <div class="legend-item"><span class="legend-line" style="background:#C25880"></span>FC media</div>
         <div class="legend-item"><span class="legend-line" style="background:#C2588040;height:8px;border-radius:2px"></span>Rango min–max</div>
       </div>
-      <div class="chart-wrap" style="height:180px;margin-top:12px">
-        <canvas id="hrChart"></canvas>
-      </div>
+      <div style="height:180px;margin-top:12px;position:relative"><canvas id="hrChart"></canvas></div>
     </div>
 
-    <!-- Fases del sueño + SpO2 tendencia -->
     <div class="panel-row">
       <div class="panel">
         <div class="panel-title">Fases del sueño</div>
@@ -154,29 +148,21 @@
       </div>
       <div class="panel">
         <div class="panel-title" id="spo2TrendTitle">SpO2 mínimo — últimos días</div>
-        <div class="chart-wrap" style="height:120px">
-          <canvas id="spo2TrendChart"></canvas>
-        </div>
+        <div style="height:120px;position:relative"><canvas id="spo2TrendChart"></canvas></div>
       </div>
     </div>
 
-    <!-- Tendencia semanal -->
     <div class="panel">
       <div class="panel-title">Tendencia — sueño y perturbaciones</div>
-      <div class="chart-wrap" style="height:150px">
-        <canvas id="trendChart"></canvas>
-      </div>
+      <div style="height:150px;position:relative"><canvas id="trendChart"></canvas></div>
     </div>
 
     <div class="footer" id="footer"></div>
   </div>
-
   <div id="errorDiv" class="error-msg hidden"></div>
 </div>
 
 <script>
-// ══════════════════════════════════════════════════════
-//  CREDENCIALES
 // ══════════════════════════════════════════════════════
 const SUPABASE_URL  = 'https://pyupnzburpgkakemzjtj.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5dXBuemJ1cnBna2FrZW16anRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0MDg4MTksImV4cCI6MjA5Njk4NDgxOX0.fMwEnjI01SUVXpIwpPQcjSYE2jgVix6aJvHgtPxvXWg';
@@ -197,6 +183,9 @@ function fmtDate(d, short) {
   if (short) return dt.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
   return dt.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
 }
+function fmtDateLong(d) {
+  return new Date(d + 'T12:00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+}
 function spo2Color(v) {
   if (v == null) return '#1D9E75';
   if (v < 90) return '#D94040';
@@ -206,17 +195,15 @@ function spo2Color(v) {
 function destroyChart(key) {
   if (charts[key]) { charts[key].destroy(); delete charts[key]; }
 }
-
 const refLinesPlugin = (id, vals) => ({
   id,
   afterDraw(chart) {
     const { ctx, chartArea: { left, right }, scales: { y } } = chart;
-    vals.forEach(([val, color, label]) => {
-      const yPos = y.getPixelForValue(val);
-      ctx.save();
-      ctx.strokeStyle = color; ctx.lineWidth = 1;
+    vals.forEach(([val, color]) => {
+      const yp = y.getPixelForValue(val);
+      ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 1;
       ctx.setLineDash([5, 4]); ctx.globalAlpha = .8;
-      ctx.beginPath(); ctx.moveTo(left, yPos); ctx.lineTo(right, yPos); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(left, yp); ctx.lineTo(right, yp); ctx.stroke();
       ctx.restore();
     });
   }
@@ -241,36 +228,228 @@ async function loadData() {
     if (!spo2ByDate[r.date]) spo2ByDate[r.date] = [];
     spo2ByDate[r.date].push({ time: r.measured_at.substring(11, 16), value: parseFloat(r.value) });
   }
-
   const hrByDate = {};
   for (const r of hrRes.data || []) {
     if (!hrByDate[r.date]) hrByDate[r.date] = [];
-    hrByDate[r.date].push({
-      time: r.measured_at.substring(11, 16),
-      min: r.min_hr != null ? parseFloat(r.min_hr) : null,
-      max: r.max_hr != null ? parseFloat(r.max_hr) : null,
-      avg: r.avg_hr != null ? parseFloat(r.avg_hr) : null,
-    });
+    hrByDate[r.date].push({ time: r.measured_at.substring(11, 16), min: r.min_hr ? parseFloat(r.min_hr) : null, max: r.max_hr ? parseFloat(r.max_hr) : null, avg: r.avg_hr ? parseFloat(r.avg_hr) : null });
   }
-
-  const sleepByDate = {};
+  const sleepByDate = {}, vitalsByDate = {};
   for (const r of sleepRes.data || []) sleepByDate[r.date] = r;
-  const vitalsByDate = {};
   for (const r of vitalsRes.data || []) vitalsByDate[r.date] = r;
 
   const dates = new Set([...Object.keys(spo2ByDate), ...Object.keys(sleepByDate), ...Object.keys(vitalsByDate)]);
   allDays = [...dates].sort();
   dayData = {};
   for (const d of allDays) {
-    dayData[d] = {
-      spo2:   spo2ByDate[d]   || [],
-      hr:     hrByDate[d]     || [],
-      sleep:  sleepByDate[d]  || null,
-      vitals: vitalsByDate[d] || null,
-    };
+    dayData[d] = { spo2: spo2ByDate[d] || [], hr: hrByDate[d] || [], sleep: sleepByDate[d] || null, vitals: vitalsByDate[d] || null };
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  EXPORTAR PDF
+// ══════════════════════════════════════════════════════════════════════════════
+function exportPDF() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const W = 210, margin = 16, contentW = W - margin * 2;
+  let y = 0;
+
+  const C = { bg: [11, 18, 32], surface: [18, 30, 48], text: [224, 234, 248], muted: [107, 139, 173], good: [29, 158, 117], warn: [201, 139, 10], bad: [217, 64, 64], white: [255, 255, 255] };
+
+  function newPage() {
+    doc.addPage();
+    y = 16;
+    // Subtle header stripe on each page
+    doc.setFillColor(...C.surface);
+    doc.rect(0, 0, W, 10, 'F');
+    doc.setFontSize(8); doc.setTextColor(...C.muted);
+    doc.setFont('helvetica', 'normal');
+    doc.text('INFORME DE SALUD NOCTURNA · SACRAMENTO', margin, 6.5);
+    doc.text(`Pág. ${doc.internal.getCurrentPageInfo().pageNumber}`, W - margin, 6.5, { align: 'right' });
+    y = 18;
+  }
+
+  function checkY(needed = 12) {
+    if (y + needed > 280) newPage();
+  }
+
+  function sectionTitle(title) {
+    checkY(14);
+    doc.setFillColor(...C.surface);
+    doc.rect(margin, y, contentW, 8, 'F');
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...C.muted);
+    doc.text(title.toUpperCase(), margin + 3, y + 5.5);
+    y += 12;
+  }
+
+  function row(label, value, valueColor, indent = 0) {
+    checkY(7);
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...C.muted);
+    doc.text(label, margin + indent, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...(valueColor || C.text));
+    doc.text(String(value), margin + 90, y);
+    y += 6;
+  }
+
+  function separator() {
+    checkY(4);
+    doc.setDrawColor(...C.surface);
+    doc.setLineWidth(0.3);
+    doc.line(margin, y, W - margin, y);
+    y += 4;
+  }
+
+  // ── PORTADA ──────────────────────────────────────────────────────────────
+  doc.setFillColor(...C.bg);
+  doc.rect(0, 0, W, 60, 'F');
+
+  doc.setFontSize(22); doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...C.text);
+  doc.text('Informe de salud nocturna', margin, 28);
+
+  doc.setFontSize(11); doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...C.muted);
+  doc.text('Apple Watch · Sacramento', margin, 37);
+
+  const today = new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+  doc.text(`Generado el ${today}`, margin, 44);
+
+  // Stats summary box
+  const critDays  = allDays.filter(d => { const v = (dayData[d]?.spo2||[]).map(p=>p.value); return v.length && Math.min(...v) < 90; });
+  const warnDays  = allDays.filter(d => { const v = (dayData[d]?.spo2||[]).map(p=>p.value); return v.length && Math.min(...v) < 94; });
+  const totalDays = allDays.length;
+
+  doc.setFillColor(...C.surface);
+  doc.roundedRect(margin, 52, contentW, 28, 3, 3, 'F');
+
+  const col = contentW / 3;
+  [[totalDays + ' días', 'analizados', C.text],
+   [warnDays.length + ' días', 'SpO2 < 94% (bajo)', C.warn],
+   [critDays.length + ' días', 'SpO2 < 90% (crítico)', C.bad]
+  ].forEach(([val, label, color], i) => {
+    const cx = margin + col * i + col / 2;
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(...color);
+    doc.text(String(val), cx, 65, { align: 'center' });
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(...C.muted);
+    doc.text(label, cx, 71, { align: 'center' });
+  });
+
+  y = 90;
+
+  // ── TABLA RESUMEN POR DÍA ────────────────────────────────────────────────
+  sectionTitle('Resumen por día');
+
+  // Table header
+  doc.setFillColor(...C.surface);
+  doc.rect(margin, y - 1, contentW, 7, 'F');
+  doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(...C.muted);
+  const cols = [0, 38, 60, 82, 105, 135, 162];
+  const headers = ['Fecha', 'SpO2 mín', 'SpO2 prom', 'Sueño', 'FC reposo', 'VFC (ms)', 'Perturb.'];
+  headers.forEach((h, i) => doc.text(h, margin + cols[i], y + 4));
+  y += 10;
+
+  for (const d of allDays.slice(-30)) {
+    checkY(7);
+    const { spo2, sleep, vitals } = dayData[d];
+    const spo2Vals = spo2.map(p => p.value);
+    const minSpo2  = spo2Vals.length ? Math.min(...spo2Vals) : null;
+    const avgSpo2  = spo2Vals.length ? Math.round(spo2Vals.reduce((a,b)=>a+b,0)/spo2Vals.length) : null;
+    const isCrit   = minSpo2 != null && minSpo2 < 90;
+    const isWarn   = minSpo2 != null && minSpo2 < 94;
+
+    // Row background for critical days
+    if (isCrit) { doc.setFillColor(217, 64, 64, 0.08); doc.rect(margin, y - 4, contentW, 6.5, 'F'); }
+
+    doc.setFontSize(8.5); doc.setFont('helvetica', isCrit ? 'bold' : 'normal');
+    doc.setTextColor(...(isCrit ? C.bad : isWarn ? C.warn : C.text));
+    doc.text(fmtDateLong(d), margin + cols[0], y);
+
+    doc.setTextColor(...(isCrit ? C.bad : isWarn ? C.warn : C.text));
+    doc.setFont('helvetica', 'bold');
+    doc.text(minSpo2 != null ? (isCrit ? '⚠ ' : '') + minSpo2 + '%' : '–', margin + cols[1], y);
+
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(...C.text);
+    doc.text(avgSpo2 != null ? avgSpo2 + '%' : '–', margin + cols[2], y);
+    doc.text(fmtH(sleep?.total_sleep), margin + cols[3], y);
+    doc.text(vitals?.resting_heart_rate != null ? Math.round(vitals.resting_heart_rate) + ' bpm' : '–', margin + cols[4], y);
+    doc.text(vitals?.hrv_avg != null ? Math.round(vitals.hrv_avg) + '' : '–', margin + cols[5], y);
+    doc.text(vitals?.breathing_disturbances != null ? vitals.breathing_disturbances.toFixed(1) : '–', margin + cols[6], y);
+
+    y += 7;
+    separator();
+  }
+
+  // ── EVENTOS CRÍTICOS SPO2 ────────────────────────────────────────────────
+  const daysWithEvents = allDays.filter(d => (dayData[d]?.spo2||[]).some(p => p.value < 94));
+
+  if (daysWithEvents.length) {
+    checkY(20);
+    sectionTitle('Eventos de SpO2 por debajo del umbral (< 94%)');
+
+    for (const d of daysWithEvents) {
+      const events = (dayData[d]?.spo2||[]).filter(p => p.value < 94).sort((a,b)=>a.time.localeCompare(b.time));
+      if (!events.length) continue;
+
+      checkY(12);
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...C.text);
+      doc.text(fmtDateLong(d), margin, y);
+      y += 7;
+
+      for (const ev of events) {
+        checkY(6);
+        const isCrit = ev.value < 90;
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...C.muted);
+        doc.text(ev.time, margin + 4, y);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...(isCrit ? C.bad : C.warn));
+        doc.text(ev.value + '%', margin + 22, y);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.text(isCrit ? '⚠ CRÍTICO — SpO2 < 90%' : 'bajo — SpO2 < 94%', margin + 38, y);
+        y += 5.5;
+      }
+      y += 3;
+    }
+  }
+
+  // ── NOTA MÉDICA ───────────────────────────────────────────────────────────
+  checkY(40);
+  sectionTitle('Nota informativa');
+
+  const nota = [
+    'Este informe ha sido generado automáticamente a partir de datos del Apple Watch.',
+    'Los valores de SpO2 por debajo del 90% de forma recurrente pueden indicar hipoxemia nocturna',
+    'y deben ser evaluados por un profesional médico. Las caídas puntuales pueden deberse a',
+    'factores como el movimiento del brazo o la posición del sensor.',
+    '',
+    'Umbrales de referencia:',
+    '  · SpO2 ≥ 94%     Normal',
+    '  · SpO2 90–93%    Bajo — seguimiento recomendado',
+    '  · SpO2 < 90%     Crítico — consultar con médico',
+    '',
+    'Las perturbaciones respiratorias (eventos/hora) son un indicador auxiliar de posible',
+    'apnea del sueño. Un valor > 15 eventos/hora es clínicamente significativo.',
+  ];
+
+  doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(...C.muted);
+  for (const line of nota) {
+    checkY(5.5);
+    doc.text(line, margin, y);
+    y += 5.5;
+  }
+
+  // Save
+  const filename = `informe-salud-sacramento-${new Date().toISOString().substring(0,10)}.pdf`;
+  doc.save(filename);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DASHBOARD RENDER
+// ══════════════════════════════════════════════════════════════════════════════
 function renderTabs() {
   const el = document.getElementById('dayTabs');
   el.innerHTML = '';
@@ -288,20 +467,16 @@ function renderTabs() {
 
 function renderDay() {
   const { spo2, hr, sleep, vitals } = dayData[selectedDate] || {};
-
-  // Alert
-  const spo2Vals = (spo2 || []).map(p => p.value);
+  const spo2Vals = (spo2||[]).map(p=>p.value);
   const minSpo2  = spo2Vals.length ? Math.min(...spo2Vals) : null;
-  const avgSpo2  = spo2Vals.length ? Math.round(spo2Vals.reduce((a, b) => a + b, 0) / spo2Vals.length) : null;
-  const alertEl  = document.getElementById('alertBanner');
+  const avgSpo2  = spo2Vals.length ? Math.round(spo2Vals.reduce((a,b)=>a+b,0)/spo2Vals.length) : null;
+
+  const alertEl = document.getElementById('alertBanner');
   if (minSpo2 != null && minSpo2 < 90) {
     alertEl.classList.remove('hidden');
     document.getElementById('alertText').textContent = `Mínimo registrado: ${minSpo2}% · Consulta a tu médico si se repite.`;
-  } else {
-    alertEl.classList.add('hidden');
-  }
+  } else { alertEl.classList.add('hidden'); }
 
-  // Cards
   document.getElementById('cardSpo2').style.borderLeftColor = spo2Color(minSpo2);
   document.getElementById('valSpo2').textContent = minSpo2 != null ? minSpo2 + '%' : '–';
   document.getElementById('valSpo2').style.color = spo2Color(minSpo2);
@@ -309,189 +484,58 @@ function renderDay() {
   document.getElementById('valHR').textContent = vitals?.resting_heart_rate != null ? vitals.resting_heart_rate + ' bpm' : '–';
   document.getElementById('subHRV').textContent = vitals?.hrv_avg != null ? `VFC ${Math.round(vitals.hrv_avg)} ms` : '–';
   document.getElementById('valSleep').textContent = fmtH(sleep?.total_sleep);
-  document.getElementById('subSleep').textContent = sleep?.sleep_start && sleep?.sleep_end
-    ? sleep.sleep_start.substring(11, 16) + ' – ' + sleep.sleep_end.substring(11, 16) : '–';
+  document.getElementById('subSleep').textContent = sleep?.sleep_start && sleep?.sleep_end ? sleep.sleep_start.substring(11,16) + ' – ' + sleep.sleep_end.substring(11,16) : '–';
   const bd = vitals?.breathing_disturbances;
   document.getElementById('cardBreathing').style.borderLeftColor = bd > 10 ? '#C98B0A' : 'var(--border)';
   document.getElementById('valBreathing').textContent = bd != null ? bd.toFixed(1) : '–';
   document.getElementById('valBreathing').style.color = bd > 10 ? '#C98B0A' : 'var(--text)';
 
-  const dateLabel = fmtDate(selectedDate);
-  document.getElementById('spo2Title').textContent = `SpO2 nocturno — ${dateLabel}`;
-  document.getElementById('hrTitle').textContent   = `Frecuencia cardíaca nocturna — ${dateLabel}`;
+  const dl = fmtDate(selectedDate);
+  document.getElementById('spo2Title').textContent = `SpO2 nocturno — ${dl}`;
+  document.getElementById('hrTitle').textContent = `Frecuencia cardíaca nocturna — ${dl}`;
 
-  // ── SpO2 chart ────────────────────────────────────────────────────────────
+  // SpO2 chart
   destroyChart('spo2');
   charts.spo2 = new Chart(document.getElementById('spo2Chart'), {
     type: 'line',
-    data: {
-      labels: spo2.map(p => p.time),
-      datasets: [{
-        label: 'SpO2', data: spo2.map(p => p.value),
-        borderColor: spo2.map(p => spo2Color(p.value)),
-        borderWidth: 2,
-        pointBackgroundColor: spo2.map(p => spo2Color(p.value)),
-        pointRadius: spo2.map(p => p.value < 90 ? 5 : p.value < 94 ? 4 : 3),
-        tension: 0.3,
-        fill: { target: 'origin', above: 'rgba(29,158,117,.08)' },
-        segment: { borderColor: ctx => spo2Color(ctx.p1.parsed.y) },
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `SpO2: ${ctx.parsed.y}%` } } },
-      scales: {
-        x: { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } },
-        y: { min: 78, max: 100, ticks: { color: '#6B8BAD', font: { size: 10 }, callback: v => v + '%' }, grid: { color: '#1E3048' } },
-      }
-    },
-    plugins: [refLinesPlugin('rl1', [[94, '#C98B0A'], [90, '#D94040']])]
+    data: { labels: spo2.map(p=>p.time), datasets: [{ label:'SpO2', data: spo2.map(p=>p.value), borderColor: spo2.map(p=>spo2Color(p.value)), borderWidth:2, pointBackgroundColor: spo2.map(p=>spo2Color(p.value)), pointRadius: spo2.map(p=>p.value<90?5:p.value<94?4:3), tension:0.3, fill:{target:'origin',above:'rgba(29,158,117,.08)'}, segment:{borderColor:ctx=>spo2Color(ctx.p1.parsed.y)} }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>`SpO2: ${ctx.parsed.y}%`}}}, scales:{ x:{ticks:{color:'#6B8BAD',font:{size:10}},grid:{color:'#1E3048'}}, y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:10},callback:v=>v+'%'},grid:{color:'#1E3048'}} } },
+    plugins:[refLinesPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
-  // ── FC chart ──────────────────────────────────────────────────────────────
+  // HR chart
   destroyChart('hr');
   if (hr && hr.length) {
-    const hrAvgs = hr.map(p => p.avg);
-    const hrMins = hr.map(p => p.min);
-    const hrMaxs = hr.map(p => p.max);
     charts.hr = new Chart(document.getElementById('hrChart'), {
-      type: 'line',
-      data: {
-        labels: hr.map(p => p.time),
-        datasets: [
-          // Rango max (invisible, solo para fill)
-          {
-            label: 'FC máx',
-            data: hrMaxs,
-            borderColor: 'transparent',
-            pointRadius: 0,
-            fill: '+1',
-            backgroundColor: 'rgba(194,88,128,0.15)',
-            tension: 0.3,
-          },
-          // Rango min (invisible)
-          {
-            label: 'FC mín',
-            data: hrMins,
-            borderColor: 'transparent',
-            pointRadius: 0,
-            fill: false,
-            tension: 0.3,
-          },
-          // Media
-          {
-            label: 'FC media',
-            data: hrAvgs,
-            borderColor: '#C25880',
-            borderWidth: 2,
-            pointBackgroundColor: '#C25880',
-            pointRadius: 2,
-            tension: 0.3,
-            fill: false,
-          },
-        ]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: ctx => {
-                if (ctx.datasetIndex === 2) return `FC media: ${Math.round(ctx.parsed.y)} bpm`;
-                if (ctx.datasetIndex === 0) return `FC máx: ${Math.round(ctx.parsed.y)} bpm`;
-                if (ctx.datasetIndex === 1) return `FC mín: ${Math.round(ctx.parsed.y)} bpm`;
-              }
-            }
-          }
-        },
-        scales: {
-          x: { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } },
-          y: { ticks: { color: '#6B8BAD', font: { size: 10 }, callback: v => v + ' bpm' }, grid: { color: '#1E3048' } },
-        }
-      }
+      type:'line',
+      data:{ labels:hr.map(p=>p.time), datasets:[
+        { label:'FC máx', data:hr.map(p=>p.max), borderColor:'transparent', pointRadius:0, fill:'+1', backgroundColor:'rgba(194,88,128,0.15)', tension:0.3 },
+        { label:'FC mín', data:hr.map(p=>p.min), borderColor:'transparent', pointRadius:0, fill:false, tension:0.3 },
+        { label:'FC media', data:hr.map(p=>p.avg), borderColor:'#C25880', borderWidth:2, pointBackgroundColor:'#C25880', pointRadius:2, tension:0.3, fill:false },
+      ]},
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>{ const n=['FC máx','FC mín','FC media'][ctx.datasetIndex]; return `${n}: ${Math.round(ctx.parsed.y)} bpm`; }}}}, scales:{ x:{ticks:{color:'#6B8BAD',font:{size:10}},grid:{color:'#1E3048'}}, y:{ticks:{color:'#6B8BAD',font:{size:10},callback:v=>v+' bpm'},grid:{color:'#1E3048'}} } }
     });
-  } else {
-    // No HR data — show message on canvas
-    const canvas = document.getElementById('hrChart');
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#6B8BAD';
-    ctx.font = '13px system-ui';
-    ctx.textAlign = 'center';
-    ctx.fillText('Sin datos de FC para este día', canvas.width / 2, 80);
   }
 
-  // ── Sleep bar ─────────────────────────────────────────────────────────────
-  const stages = [
-    { label: 'Profundo',  color: '#5A48C0', val: sleep?.deep  },
-    { label: 'REM',       color: '#1A7A60', val: sleep?.rem   },
-    { label: 'Ligero',    color: '#2872B8', val: sleep?.core  },
-    { label: 'Despierto', color: '#3A4A5A', val: sleep?.awake },
-  ];
-  const barEl = document.getElementById('sleepBar');
-  const legEl = document.getElementById('sleepLegend');
-  barEl.innerHTML = ''; legEl.innerHTML = '';
-  stages.filter(s => s.val > 0).forEach(s => {
-    const seg = document.createElement('div');
-    seg.className = 'sleep-seg';
-    seg.style.cssText = `flex:${s.val};background:${s.color}`;
-    seg.textContent = s.val > 0.4 ? fmtH(s.val) : '';
-    barEl.appendChild(seg);
-  });
-  stages.forEach(s => {
-    const item = document.createElement('div');
-    item.className = 'sleep-leg-item';
-    item.innerHTML = `<div class="sleep-dot" style="background:${s.color}"></div><span class="sleep-leg-label">${s.label}</span><span class="sleep-leg-val">${fmtH(s.val)}</span>`;
-    legEl.appendChild(item);
-  });
+  // Sleep bar
+  const stages=[{label:'Profundo',color:'#5A48C0',val:sleep?.deep},{label:'REM',color:'#1A7A60',val:sleep?.rem},{label:'Ligero',color:'#2872B8',val:sleep?.core},{label:'Despierto',color:'#3A4A5A',val:sleep?.awake}];
+  const barEl=document.getElementById('sleepBar'), legEl=document.getElementById('sleepLegend');
+  barEl.innerHTML=''; legEl.innerHTML='';
+  stages.filter(s=>s.val>0).forEach(s=>{ const seg=document.createElement('div'); seg.className='sleep-seg'; seg.style.cssText=`flex:${s.val};background:${s.color}`; seg.textContent=s.val>0.4?fmtH(s.val):''; barEl.appendChild(seg); });
+  stages.forEach(s=>{ const item=document.createElement('div'); item.className='sleep-leg-item'; item.innerHTML=`<div class="sleep-dot" style="background:${s.color}"></div><span class="sleep-leg-label">${s.label}</span><span class="sleep-leg-val">${fmtH(s.val)}</span>`; legEl.appendChild(item); });
 
-  // ── SpO2 trend ────────────────────────────────────────────────────────────
-  const recentDays = allDays.slice(-14);
-  const spo2Trend = recentDays.map(d => { const v = (dayData[d]?.spo2||[]).map(p=>p.value); return v.length ? Math.min(...v) : null; });
+  // SpO2 trend
+  const rd=allDays.slice(-14), st=rd.map(d=>{const v=(dayData[d]?.spo2||[]).map(p=>p.value);return v.length?Math.min(...v):null;});
   destroyChart('spo2Trend');
-  document.getElementById('spo2TrendTitle').textContent = `SpO2 mínimo — últimos ${recentDays.length} días`;
-  charts.spo2Trend = new Chart(document.getElementById('spo2TrendChart'), {
-    type: 'bar',
-    data: {
-      labels: recentDays.map(d => fmtDate(d, true)),
-      datasets: [{ label: 'SpO2 mín', data: spo2Trend, backgroundColor: spo2Trend.map(v => spo2Color(v)+'CC'), borderColor: spo2Trend.map(v => spo2Color(v)), borderWidth: 1, borderRadius: 4 }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { display: false } },
-        y: { min: 75, max: 100, ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } }
-      }
-    },
-    plugins: [refLinesPlugin('rl2', [[94, '#C98B0A'], [90, '#D94040']])]
-  });
+  document.getElementById('spo2TrendTitle').textContent=`SpO2 mínimo — últimos ${rd.length} días`;
+  charts.spo2Trend=new Chart(document.getElementById('spo2TrendChart'),{type:'bar',data:{labels:rd.map(d=>fmtDate(d,true)),datasets:[{label:'SpO2 mín',data:st,backgroundColor:st.map(v=>spo2Color(v)+'CC'),borderColor:st.map(v=>spo2Color(v)),borderWidth:1,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:10}},grid:{display:false}},y:{min:75,max:100,ticks:{color:'#6B8BAD',font:{size:10}},grid:{color:'#1E3048'}}}},plugins:[refLinesPlugin('rl2',[[94,'#C98B0A'],[90,'#D94040']])]});
 
-  // ── Weekly trend ──────────────────────────────────────────────────────────
+  // Weekly trend
   destroyChart('trend');
-  const trendDays = allDays.slice(-14);
-  charts.trend = new Chart(document.getElementById('trendChart'), {
-    type: 'bar',
-    data: {
-      labels: trendDays.map(d => fmtDate(d, true)),
-      datasets: [
-        { type: 'bar',  label: 'Sueño (h)',     data: trendDays.map(d => dayData[d]?.sleep?.total_sleep ?? null),               backgroundColor: '#7A6EE880', borderRadius: 3, yAxisID: 'y'  },
-        { type: 'line', label: 'Perturbaciones', data: trendDays.map(d => dayData[d]?.vitals?.breathing_disturbances ?? null), borderColor: '#C98B0A', borderWidth: 2, pointBackgroundColor: '#C98B0A', pointRadius: 3, tension: 0.3, yAxisID: 'y2' }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: true, labels: { color: '#6B8BAD', font: { size: 11 }, boxWidth: 12, boxHeight: 2 } } },
-      scales: {
-        x:  { ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { display: false } },
-        y:  { position: 'left',  ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { color: '#1E3048' } },
-        y2: { position: 'right', ticks: { color: '#6B8BAD', font: { size: 10 } }, grid: { display: false } },
-      }
-    }
-  });
+  const td=allDays.slice(-14);
+  charts.trend=new Chart(document.getElementById('trendChart'),{type:'bar',data:{labels:td.map(d=>fmtDate(d,true)),datasets:[{type:'bar',label:'Sueño (h)',data:td.map(d=>dayData[d]?.sleep?.total_sleep??null),backgroundColor:'#7A6EE880',borderRadius:3,yAxisID:'y'},{type:'line',label:'Perturbaciones',data:td.map(d=>dayData[d]?.vitals?.breathing_disturbances??null),borderColor:'#C98B0A',borderWidth:2,pointBackgroundColor:'#C98B0A',pointRadius:3,tension:0.3,yAxisID:'y2'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{color:'#6B8BAD',font:{size:11},boxWidth:12,boxHeight:2}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:10}},grid:{display:false}},y:{position:'left',ticks:{color:'#6B8BAD',font:{size:10}},grid:{color:'#1E3048'}},y2:{position:'right',ticks:{color:'#6B8BAD',font:{size:10}},grid:{display:false}}}}});
 
-  document.getElementById('footer').textContent =
-    `Apple Watch de Sacramento · actualizado ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+  document.getElementById('footer').textContent=`Apple Watch de Sacramento · actualizado ${new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}`;
 }
 
 async function init() {
@@ -501,19 +545,14 @@ async function init() {
   try {
     await loadData();
     document.getElementById('loader').classList.add('hidden');
-    if (!allDays.length) {
-      document.getElementById('errorDiv').classList.remove('hidden');
-      document.getElementById('errorDiv').textContent = 'No hay datos todavía.';
-      return;
-    }
+    if (!allDays.length) { document.getElementById('errorDiv').classList.remove('hidden'); document.getElementById('errorDiv').textContent='No hay datos todavía.'; return; }
     document.getElementById('content').classList.remove('hidden');
-    selectedDate = allDays[allDays.length - 1];
-    renderTabs();
-    renderDay();
-  } catch (err) {
+    selectedDate=allDays[allDays.length-1];
+    renderTabs(); renderDay();
+  } catch(err) {
     document.getElementById('loader').classList.add('hidden');
     document.getElementById('errorDiv').classList.remove('hidden');
-    document.getElementById('errorDiv').textContent = 'Error: ' + err.message;
+    document.getElementById('errorDiv').textContent='Error: '+err.message;
   }
 }
 
