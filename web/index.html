@@ -8,11 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
-  :root {
-    --bg:#0B1220;--surface:#121E30;--border:#1E3048;--text:#E0EAF8;
-    --muted:#6B8BAD;--good:#1D9E75;--warn:#C98B0A;--bad:#D94040;
-    --purple:#7A6EE8;--pink:#C25880;--teal:#1A9E8F;--radius:12px;
-  }
+  :root{--bg:#0B1220;--surface:#121E30;--border:#1E3048;--text:#E0EAF8;--muted:#6B8BAD;--good:#1D9E75;--warn:#C98B0A;--bad:#D94040;--purple:#7A6EE8;--pink:#C25880;--teal:#1A9E8F;--radius:12px;}
   *{box-sizing:border-box;margin:0;padding:0;}
   body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh;}
   .app{max-width:920px;margin:0 auto;padding:20px 16px 48px;}
@@ -47,6 +43,7 @@
   .day-num{font-size:13px;font-weight:600;line-height:1;}
   .day-wd{font-size:9px;text-transform:uppercase;letter-spacing:.04em;}
   .day-dot{width:6px;height:6px;border-radius:50%;}
+  .hint{font-size:10px;color:var(--muted);text-align:center;margin-top:6px;opacity:.6;}
   /* Alert */
   .alert{background:rgba(217,64,64,.12);border:1px solid rgba(217,64,64,.4);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;}
   .alert-title{color:var(--bad);font-weight:600;font-size:13px;}
@@ -70,6 +67,10 @@
   .dual-col:last-child{padding-right:0;}
   .dual-col-title{font-size:10px;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px;}
   .dual-col-title span{display:inline-block;width:12px;height:2px;border-radius:1px;}
+  /* Clickable spo2 area */
+  .spo2-clickable{cursor:pointer;border-radius:8px;transition:background .15s;}
+  .spo2-clickable:hover{background:rgba(255,255,255,.03);}
+  .spo2-click-hint{font-size:10px;color:var(--muted);margin-top:6px;text-align:center;opacity:.7;}
   /* Panels */
   .panel{background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
   .panel-title{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
@@ -94,22 +95,37 @@
   .loader-text{color:var(--muted);font-size:13px;}
   .error-msg{color:var(--bad);text-align:center;padding:40px;}
   .footer{text-align:center;color:var(--muted);font-size:10px;letter-spacing:.06em;margin-top:16px;text-transform:uppercase;}
-  .hint{font-size:10px;color:var(--muted);text-align:center;margin-top:6px;opacity:.6;}
-  /* PDF Modal */
-  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;}
-  .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;width:100%;max-width:400px;}
+  /* Modals */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;width:100%;max-width:420px;}
   .modal h3{font-size:16px;font-weight:600;margin-bottom:8px;}
   .modal p{color:var(--muted);font-size:13px;margin-bottom:20px;}
   .modal-options{display:flex;flex-direction:column;gap:8px;margin-bottom:20px;}
   .modal-opt{background:transparent;border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;cursor:pointer;text-align:left;font-size:13px;transition:all .15s;}
   .modal-opt:hover{border-color:var(--muted);background:var(--bg);}
   .modal-opt.selected{border-color:var(--good);color:var(--good);}
-  .modal-footer{display:flex;gap:8px;justify-content:flex-end;}
+  .modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;}
   .btn-primary{background:var(--text);color:var(--bg);border:none;padding:8px 20px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:600;}
   .btn-primary:disabled{opacity:.5;cursor:default;}
   .btn-cancel{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 16px;border-radius:20px;cursor:pointer;font-size:13px;}
   .progress-bar{background:var(--border);border-radius:4px;height:4px;margin:12px 0;overflow:hidden;}
   .progress-fill{background:var(--good);height:4px;border-radius:4px;transition:width .3s;}
+  /* SpO2 readings modal */
+  .spo2-modal{max-width:460px;max-height:80vh;display:flex;flex-direction:column;}
+  .spo2-modal-header{flex-shrink:0;margin-bottom:16px;}
+  .spo2-modal-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;flex-shrink:0;}
+  .spo2-stat{background:var(--bg);border-radius:8px;padding:10px;text-align:center;}
+  .spo2-stat-val{font-size:20px;font-weight:700;}
+  .spo2-stat-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;}
+  .spo2-table-wrap{overflow-y:auto;flex:1;border:1px solid var(--border);border-radius:8px;}
+  .spo2-table{width:100%;border-collapse:collapse;font-size:13px;}
+  .spo2-table th{background:var(--bg);color:var(--muted);font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:8px 12px;text-align:left;position:sticky;top:0;}
+  .spo2-table td{padding:7px 12px;border-top:1px solid var(--border);}
+  .spo2-table tr:hover td{background:rgba(255,255,255,.03);}
+  .spo2-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;}
+  .badge-good{background:rgba(29,158,117,.2);color:#1D9E75;}
+  .badge-warn{background:rgba(201,139,10,.2);color:#C98B0A;}
+  .badge-bad{background:rgba(217,64,64,.2);color:#D94040;}
 </style>
 </head>
 <body>
@@ -141,7 +157,7 @@
         <div class="day-scroller" id="dayScroller"></div>
         <button class="day-arrow" id="nextBtn" onclick="nextDay()">›</button>
       </div>
-      <p class="hint">Doble clic en un día para forzar recarga de datos</p>
+      <p class="hint">Las fechas muestran la noche anterior · Doble clic para forzar recarga</p>
     </div>
 
     <div id="alertBanner" class="alert hidden">
@@ -200,16 +216,18 @@
       </div>
     </div>
 
-    <!-- SpO2 + FC sincronizadas -->
+    <!-- SpO2 + FC -->
     <div class="dual-panel">
       <div class="dual-panel-title" id="dualTitle">SpO2 y FC durante el sueño</div>
       <div class="dual-sleep-label" id="dualSleepLabel"></div>
       <div class="dual-charts">
+        <!-- SpO2 — clic para ver todas las lecturas -->
         <div class="dual-col">
           <div class="dual-col-title"><span style="background:var(--good)"></span>Saturación O₂ (SpO2)</div>
-          <div style="height:200px;position:relative" id="spo2Wrap">
+          <div class="spo2-clickable" id="spo2Wrap" onclick="showSpo2Modal()" style="height:200px;position:relative">
             <div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>
           </div>
+          <div class="spo2-click-hint">↗ Clic para ver todas las lecturas</div>
           <div class="legend">
             <div class="legend-item"><span class="legend-line" style="background:var(--warn)"></span>94%</div>
             <div class="legend-item"><span class="legend-line" style="background:var(--bad)"></span>90%</div>
@@ -228,7 +246,7 @@
       </div>
     </div>
 
-    <!-- Fases + caídas por noche -->
+    <!-- Fases + caídas -->
     <div class="panel-row">
       <div class="panel">
         <div class="panel-title">Fases del sueño</div>
@@ -241,7 +259,6 @@
       </div>
     </div>
 
-    <!-- SpO2 mensual -->
     <div class="panel">
       <div class="panel-title" id="monthChartTitle">SpO2 mínimo — mes</div>
       <div style="height:120px;position:relative"><canvas id="spo2MonthChart"></canvas></div>
@@ -252,7 +269,33 @@
   <div id="errorDiv" class="error-msg hidden"></div>
 </div>
 
-<!-- PDF Modal -->
+<!-- Modal lecturas SpO2 -->
+<div id="spo2Modal" class="modal-overlay hidden" onclick="if(event.target===this)closeSpo2Modal()">
+  <div class="modal spo2-modal">
+    <div class="spo2-modal-header">
+      <h3 id="spo2ModalTitle">Lecturas SpO2</h3>
+      <p id="spo2ModalSubtitle" style="margin-bottom:0"></p>
+    </div>
+    <div class="spo2-modal-summary" id="spo2ModalSummary"></div>
+    <div class="spo2-table-wrap">
+      <table class="spo2-table">
+        <thead>
+          <tr>
+            <th>Hora</th>
+            <th>SpO2</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="spo2TableBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeSpo2Modal()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal PDF -->
 <div id="pdfModal" class="modal-overlay hidden">
   <div class="modal">
     <h3>Exportar informe PDF</h3>
@@ -290,6 +333,14 @@ const fmtDateMed=d=>new Date(d+'T12:00:00').toLocaleDateString('es-ES',{day:'num
 const fmtDateShort=d=>new Date(d+'T12:00:00').toLocaleDateString('es-ES',{day:'numeric',month:'short'});
 const WD=['do','lu','ma','mi','ju','vi','sá'];
 const dayWd=d=>WD[new Date(d+'T12:00:00').getDay()];
+
+// DIA-1: la noche mostrada es la del día anterior al registrado en BD
+function prevDate(d){
+  const dt=new Date(d+'T12:00:00');
+  dt.setDate(dt.getDate()-1);
+  return dt.toISOString().substring(0,10);
+}
+
 function sc(v){if(v==null)return'#1D9E75';if(v<90)return'#D94040';if(v<94)return'#C98B0A';return'#1D9E75';}
 function dc(k){if(charts[k]){charts[k].destroy();delete charts[k];}}
 const rlPlugin=(id,vals)=>({id,afterDraw(ch){
@@ -302,71 +353,41 @@ function inSleepWindow(time,start,end){
   return time>=start||time<=end;
 }
 
-// ── Carga resúmenes — usa la vista spo2_daily ─────────────────────────────
+// ── Carga resúmenes ────────────────────────────────────────────────────────
 async function loadSummaries(){
-  document.getElementById('loaderText').textContent='Cargando historial…';
-
   const[sleepRes,vitalsRes,spo2Res]=await Promise.all([
-    db.from('sleep_analysis')
-      .select('date,total_sleep,deep,rem,core,awake,in_bed,sleep_start,sleep_end')
-      .order('date'),
-    db.from('daily_vitals')
-      .select('date,resting_heart_rate,hrv_avg,breathing_disturbances,respiratory_rate_avg,wrist_temperature')
-      .order('date'),
-    // Vista pre-agregada: una fila por día, sin límite de filas problemático
-    db.from('spo2_daily')
-      .select('date,spo2_min,spo2_avg,ev94,ev90')
-      .order('date'),
+    db.from('sleep_analysis').select('date,total_sleep,deep,rem,core,awake,in_bed,sleep_start,sleep_end').order('date'),
+    db.from('daily_vitals').select('date,resting_heart_rate,hrv_avg,breathing_disturbances,respiratory_rate_avg,wrist_temperature').order('date'),
+    db.from('spo2_daily').select('date,spo2_min,spo2_avg,ev94,ev90').order('date'),
   ]);
-
   if(sleepRes.error)throw sleepRes.error;
-  if(spo2Res.error)throw new Error('spo2_daily: '+spo2Res.error.message+' — ¿ejecutaste el SQL de la vista en Supabase?');
+  if(spo2Res.error)throw new Error('Vista spo2_daily no encontrada. Ejecuta el SQL en Supabase primero.');
 
-  // SpO2 ya viene agregado por la vista
   const spo2ByDate={};
   for(const r of spo2Res.data||[]){
     spo2ByDate[r.date]={
-      spo2_min: r.spo2_min!=null?parseFloat(r.spo2_min):null,
-      spo2_avg: r.spo2_avg!=null?parseInt(r.spo2_avg):null,
-      ev94: r.ev94||0,
-      ev90: r.ev90||0,
+      spo2_min:r.spo2_min!=null?parseFloat(r.spo2_min):null,
+      spo2_avg:r.spo2_avg!=null?parseInt(r.spo2_avg):null,
+      ev94:r.ev94||0, ev90:r.ev90||0,
     };
   }
-
   const sleepByDate={},vitalsByDate={};
   for(const r of sleepRes.data||[]) sleepByDate[r.date]=r;
   for(const r of vitalsRes.data||[]) vitalsByDate[r.date]=r;
 
-  const dates=new Set([
-    ...Object.keys(sleepByDate),
-    ...Object.keys(vitalsByDate),
-    ...Object.keys(spo2ByDate),
-  ]);
-
+  const dates=new Set([...Object.keys(sleepByDate),...Object.keys(vitalsByDate),...Object.keys(spo2ByDate)]);
   summaries={};
   for(const d of dates){
     const agg=spo2ByDate[d]||{spo2_min:null,spo2_avg:null,ev94:0,ev90:0};
-    summaries[d]={
-      sleep:    sleepByDate[d]  || null,
-      vitals:   vitalsByDate[d] || null,
-      spo2_min: agg.spo2_min,
-      spo2_avg: agg.spo2_avg,
-      ev94:     agg.ev94,
-      ev90:     agg.ev90,
-    };
+    summaries[d]={sleep:sleepByDate[d]||null,vitals:vitalsByDate[d]||null,...agg};
   }
-
   allDays=[...dates].sort();
   monthsMap={};
-  for(const d of allDays){
-    const m=d.substring(0,7);
-    if(!monthsMap[m])monthsMap[m]=[];
-    monthsMap[m].push(d);
-  }
+  for(const d of allDays){const m=d.substring(0,7);if(!monthsMap[m])monthsMap[m]=[];monthsMap[m].push(d);}
   allMonths=Object.keys(monthsMap).sort();
 }
 
-// ── Detalle del día bajo demanda ──────────────────────────────────────────
+// ── Detalle bajo demanda ──────────────────────────────────────────────────
 async function loadDayDetail(date,force=false){
   if(dayDetail[date]&&!force)return;
   const[spo2Res,hrRes]=await Promise.all([
@@ -399,13 +420,16 @@ function renderDays(){
   for(let d=1;d<=dim;d++){
     const ds=`${selectedMonth}-${String(d).padStart(2,'0')}`;
     const has=!!summaries[ds],s=summaries[ds];
+    // Mostrar DIA-1 en la píldora
+    const pd=prevDate(ds);
+    const pdNum=new Date(pd+'T12:00:00').getDate();
     const btn=document.createElement('button');
     btn.className='day-pill'+(ds===selectedDate?' active':'')+(!has?' no-data':'');
-    btn.title=has?'Clic para ver · Doble clic para forzar recarga':'Sin datos';
-    btn.innerHTML=`<span class="day-wd">${dayWd(ds)}</span><span class="day-num">${d}</span><span class="day-dot" style="background:${has?sc(s?.spo2_min):'#1E3048'}"></span>`;
+    btn.title=has?`Noche del ${fmtDateShort(pd)} · Doble clic para forzar recarga`:'Sin datos';
+    btn.innerHTML=`<span class="day-wd">${dayWd(pd)}</span><span class="day-num">${pdNum}</span><span class="day-dot" style="background:${has?sc(s?.spo2_min):'#1E3048'}"></span>`;
     if(has){
       btn.onclick=()=>selectDay(ds);
-      btn.ondblclick=()=>selectDay(ds,true); // doble clic → fuerza recarga
+      btn.ondblclick=()=>selectDay(ds,true);
     }
     el.appendChild(btn);
   }
@@ -422,16 +446,13 @@ function selectMonth(m){
   renderMonths();renderDays();
   if(selectedDate)renderDay();
 }
-
 async function selectDay(date,force=false){
   selectedDate=date;
   const nm=date.substring(0,7);
   if(nm!==selectedMonth){selectedMonth=nm;renderMonths();}
-  if(force)delete dayDetail[date]; // borra caché para forzar recarga
-  renderDays();
-  await renderDay();
+  if(force)delete dayDetail[date];
+  renderDays();await renderDay();
 }
-
 function prevDay(){const i=allDays.indexOf(selectedDate);if(i>0)selectDay(allDays[i-1]);}
 function nextDay(){const i=allDays.indexOf(selectedDate);if(i<allDays.length-1)selectDay(allDays[i+1]);}
 function jumpToday(){
@@ -440,28 +461,66 @@ function jumpToday(){
   selectDay(cl);
 }
 
+// ── Modal SpO2 ────────────────────────────────────────────────────────────
+function showSpo2Modal(){
+  if(!selectedDate||!dayDetail[selectedDate])return;
+  const{spo2}=dayDetail[selectedDate];
+  const pd=prevDate(selectedDate);
+
+  document.getElementById('spo2ModalTitle').textContent=`Lecturas SpO2 — Noche del ${fmtDateLong(pd)}`;
+
+  const vals=spo2.map(p=>p.value);
+  const minV=vals.length?Math.min(...vals):null;
+  const avgV=vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length):null;
+  const below94=spo2.filter(p=>p.value<94).length;
+  const below90=spo2.filter(p=>p.value<90).length;
+
+  document.getElementById('spo2ModalSubtitle').textContent=`${spo2.length} lecturas registradas durante el sueño`;
+
+  const sumEl=document.getElementById('spo2ModalSummary');
+  sumEl.innerHTML=`
+    <div class="spo2-stat"><div class="spo2-stat-val" style="color:${sc(minV)}">${minV!=null?minV+'%':'–'}</div><div class="spo2-stat-lbl">Mínimo</div></div>
+    <div class="spo2-stat"><div class="spo2-stat-val">${avgV!=null?avgV+'%':'–'}</div><div class="spo2-stat-lbl">Promedio</div></div>
+    <div class="spo2-stat"><div class="spo2-stat-val" style="color:${below90>0?'#D94040':below94>0?'#C98B0A':'#1D9E75'}">${below94}</div><div class="spo2-stat-lbl">Caídas &lt;94%${below90>0?' ('+below90+' crit.)':''}</div></div>
+  `;
+
+  const tbody=document.getElementById('spo2TableBody');
+  tbody.innerHTML='';
+  spo2.forEach(p=>{
+    const isCrit=p.value<90,isWarn=p.value<94;
+    const badge=isCrit?'badge-bad':isWarn?'badge-warn':'badge-good';
+    const label=isCrit?'CRÍTICO':isWarn?'Bajo':'Normal';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:${sc(p.value)}">${p.value}%</td><td><span class="spo2-badge ${badge}">${label}</span></td>`;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('spo2Modal').classList.remove('hidden');
+}
+function closeSpo2Modal(){document.getElementById('spo2Modal').classList.add('hidden');}
+
 // ── Renderiza el día ──────────────────────────────────────────────────────
 async function renderDay(){
   const s=summaries[selectedDate];if(!s)return;
   const{sleep,vitals,spo2_min,spo2_avg,ev94,ev90}=s;
+  const pd=prevDate(selectedDate); // fecha de display (noche anterior)
 
-  // Alerta crítica
+  // Alerta
   const alertEl=document.getElementById('alertBanner');
   if(spo2_min!=null&&spo2_min<90){
     alertEl.classList.remove('hidden');
-    document.getElementById('alertText').textContent=`Mínimo registrado: ${spo2_min}% · Consulta a tu médico si se repite.`;
+    document.getElementById('alertText').textContent=`Mínimo registrado: ${spo2_min}% — noche del ${fmtDateShort(pd)} · Consulta a tu médico si se repite.`;
   } else alertEl.classList.add('hidden');
 
-  // ── Tarjetas fila 1 ────────────────────────────────────────────────────
+  // Tarjetas fila 1
   document.getElementById('cardSpo2').style.borderLeftColor=sc(spo2_min);
   document.getElementById('valSpo2').textContent=spo2_min!=null?spo2_min+'%':'–';
   document.getElementById('valSpo2').style.color=sc(spo2_min);
   document.getElementById('subSpo2').textContent=spo2_avg!=null?`prom. ${spo2_avg}%`:'–';
 
   document.getElementById('valSleep').textContent=fmtH(sleep?.total_sleep);
-  document.getElementById('subSleep').textContent=
-    sleep?.sleep_start&&sleep?.sleep_end
-      ?sleep.sleep_start.substring(11,16)+' – '+sleep.sleep_end.substring(11,16):'–';
+  document.getElementById('subSleep').textContent=sleep?.sleep_start&&sleep?.sleep_end
+    ?sleep.sleep_start.substring(11,16)+' – '+sleep.sleep_end.substring(11,16):'–';
 
   document.getElementById('cardEvents94').style.borderLeftColor=ev90>0?'#D94040':ev94>5?'#C98B0A':'var(--border)';
   document.getElementById('valEvents94').textContent=ev94!=null?ev94:'–';
@@ -473,11 +532,10 @@ async function renderDay(){
   document.getElementById('valBreathing').textContent=bd!=null?bd.toFixed(1):'–';
   document.getElementById('valBreathing').style.color=bd>10?'#C98B0A':'var(--text)';
 
-  // ── Tarjetas fila 2 ────────────────────────────────────────────────────
+  // Tarjetas fila 2
   document.getElementById('valHR').textContent=vitals?.resting_heart_rate!=null?vitals.resting_heart_rate+' bpm':'–';
   document.getElementById('subHRV').textContent=vitals?.hrv_avg!=null?`VFC ${Math.round(vitals.hrv_avg)} ms`:'–';
 
-  // Eficiencia del sueño — usa awake+total si in_bed es 0
   const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
   const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
   document.getElementById('valEfficiency').textContent=eff!=null?eff+'%':'–';
@@ -491,161 +549,90 @@ async function renderDay(){
   const temp=vitals?.wrist_temperature;
   document.getElementById('valTemp').textContent=temp!=null?temp.toFixed(1)+'°C':'–';
 
-  // ── Título del panel dual ──────────────────────────────────────────────
+  // Título del panel dual — usa fecha de display (pd)
   const sleepStart=sleep?.sleep_start?.substring(11,16);
   const sleepEnd=sleep?.sleep_end?.substring(11,16);
-  document.getElementById('dualTitle').textContent=`SpO2 y FC durante el sueño — ${fmtDateShort(selectedDate)}`;
+  document.getElementById('dualTitle').textContent=`SpO2 y FC — Noche del ${fmtDateShort(pd)}`;
   document.getElementById('dualSleepLabel').textContent=sleepStart&&sleepEnd?`Ventana de sueño: ${sleepStart} – ${sleepEnd}`:'';
 
-  // Mostrar loading
+  // Loading
   document.getElementById('spo2Wrap').innerHTML='<div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>';
   document.getElementById('hrWrap').innerHTML='<div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>';
   dc('spo2');dc('hr');
 
   await loadDayDetail(selectedDate);
   const{spo2,hr}=dayDetail[selectedDate];
-
-  // Filtrar al rango del sueño
   const spo2Sleep=spo2.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
   const hrSleep=hr.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
 
-  // ── Gráfica SpO2 ────────────────────────────────────────────────────────
+  // SpO2 chart — contenedor clickable
   document.getElementById('spo2Wrap').innerHTML='<canvas id="spo2Chart"></canvas>';
+  document.getElementById('spo2Wrap').onclick=showSpo2Modal;
   charts.spo2=new Chart(document.getElementById('spo2Chart'),{
     type:'line',
-    data:{
-      labels:spo2Sleep.map(p=>p.time),
-      datasets:[{
-        label:'SpO2',data:spo2Sleep.map(p=>p.value),
-        borderColor:spo2Sleep.map(p=>sc(p.value)),
-        borderWidth:2,
-        pointBackgroundColor:spo2Sleep.map(p=>sc(p.value)),
-        pointRadius:spo2Sleep.map(p=>p.value<90?5:p.value<94?4:3),
-        tension:0.3,
-        fill:{target:'origin',above:'rgba(29,158,117,.08)'},
-        segment:{borderColor:ctx=>sc(ctx.p1.parsed.y)},
-      }]
-    },
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`SpO2: ${ctx.parsed.y}%`}}},
-      scales:{
-        x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},
-        y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}},
-      }
-    },
+    data:{labels:spo2Sleep.map(p=>p.time),datasets:[{label:'SpO2',data:spo2Sleep.map(p=>p.value),borderColor:spo2Sleep.map(p=>sc(p.value)),borderWidth:2,pointBackgroundColor:spo2Sleep.map(p=>sc(p.value)),pointRadius:spo2Sleep.map(p=>p.value<90?5:p.value<94?4:3),tension:0.3,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>sc(ctx.p1.parsed.y)}}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`SpO2: ${ctx.parsed.y}%`}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},
     plugins:[rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
-  // ── Gráfica FC ──────────────────────────────────────────────────────────
+  // FC chart
   document.getElementById('hrWrap').innerHTML='<canvas id="hrChart"></canvas>';
   if(hrSleep.length){
     charts.hr=new Chart(document.getElementById('hrChart'),{
       type:'line',
-      data:{
-        labels:hrSleep.map(p=>p.time),
-        datasets:[
-          {label:'FC máx',data:hrSleep.map(p=>p.max),borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3},
-          {label:'FC mín',data:hrSleep.map(p=>p.min),borderColor:'transparent',pointRadius:0,fill:false,tension:0.3},
-          {label:'FC media',data:hrSleep.map(p=>p.avg),borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false},
-        ]
-      },
-      options:{
-        responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>['FC máx','FC mín','FC media'][ctx.datasetIndex]+': '+Math.round(ctx.parsed.y)+' bpm'}}},
-        scales:{
-          x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},
-          y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}},
-        }
-      }
+      data:{labels:hrSleep.map(p=>p.time),datasets:[
+        {label:'FC máx',data:hrSleep.map(p=>p.max),borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3},
+        {label:'FC mín',data:hrSleep.map(p=>p.min),borderColor:'transparent',pointRadius:0,fill:false,tension:0.3},
+        {label:'FC media',data:hrSleep.map(p=>p.avg),borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false},
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>['FC máx','FC mín','FC media'][ctx.datasetIndex]+': '+Math.round(ctx.parsed.y)+' bpm'}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}}
     });
   } else {
-    const cv=document.getElementById('hrChart'),ctx2=cv.getContext('2d');
-    ctx2.fillStyle='#6B8BAD';ctx2.font='12px system-ui';ctx2.textAlign='center';
-    ctx2.fillText('Sin datos de FC para este día',cv.width/2,90);
+    const cv=document.getElementById('hrChart'),c2=cv.getContext('2d');
+    c2.fillStyle='#6B8BAD';c2.font='12px system-ui';c2.textAlign='center';c2.fillText('Sin datos de FC',cv.width/2,90);
   }
 
-  // ── Fases del sueño ──────────────────────────────────────────────────────
-  const stages=[
-    {l:'Profundo',c:'#5A48C0',v:sleep?.deep},
-    {l:'REM',     c:'#1A7A60',v:sleep?.rem},
-    {l:'Ligero',  c:'#2872B8',v:sleep?.core},
-    {l:'Despierto',c:'#3A4A5A',v:sleep?.awake},
-  ];
+  // Fases del sueño
+  const stages=[{l:'Profundo',c:'#5A48C0',v:sleep?.deep},{l:'REM',c:'#1A7A60',v:sleep?.rem},{l:'Ligero',c:'#2872B8',v:sleep?.core},{l:'Despierto',c:'#3A4A5A',v:sleep?.awake}];
   const barEl=document.getElementById('sleepBar'),legEl=document.getElementById('sleepLegend');
   barEl.innerHTML='';legEl.innerHTML='';
-  stages.filter(s=>s.v>0).forEach(s=>{
-    const sg=document.createElement('div');sg.className='sleep-seg';
-    sg.style.cssText=`flex:${s.v};background:${s.c}`;
-    sg.textContent=s.v>0.4?fmtH(s.v):'';
-    barEl.appendChild(sg);
-  });
-  stages.forEach(s=>{
-    const it=document.createElement('div');it.className='sleep-leg-item';
-    it.innerHTML=`<div class="sleep-dot" style="background:${s.c}"></div><span class="sleep-leg-label">${s.l}</span><span class="sleep-leg-val">${fmtH(s.v)}</span>`;
-    legEl.appendChild(it);
-  });
+  stages.filter(s=>s.v>0).forEach(s=>{const sg=document.createElement('div');sg.className='sleep-seg';sg.style.cssText=`flex:${s.v};background:${s.c}`;sg.textContent=s.v>0.4?fmtH(s.v):'';barEl.appendChild(sg);});
+  stages.forEach(s=>{const it=document.createElement('div');it.className='sleep-leg-item';it.innerHTML=`<div class="sleep-dot" style="background:${s.c}"></div><span class="sleep-leg-label">${s.l}</span><span class="sleep-leg-val">${fmtH(s.v)}</span>`;legEl.appendChild(it);});
 
-  // ── Caídas SpO2 por noche (30 días) ─────────────────────────────────────
+  // Caídas SpO2 por noche
   const rd=allDays.slice(-30);
   dc('events');
-  document.getElementById('eventsChartTitle').textContent=`Caídas SpO2 < 94% — últimos ${rd.length} días`;
   const evData=rd.map(d=>summaries[d]?.ev94??null);
   charts.events=new Chart(document.getElementById('eventsChart'),{
     type:'bar',
-    data:{
-      labels:rd.map(d=>fmtDateShort(d)),
-      datasets:[{
-        label:'Caídas < 94%',data:evData,
-        backgroundColor:evData.map(v=>v==null?'#1E3048':v>10?'rgba(217,64,64,.6)':v>5?'rgba(201,139,10,.6)':'rgba(29,158,117,.5)'),
-        borderRadius:3,
-      }]
-    },
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y} caídas < 94%`}}},
-      scales:{
-        x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:10},grid:{display:false}},
-        y:{ticks:{color:'#6B8BAD',font:{size:9}},grid:{color:'#1E3048'},beginAtZero:true},
-      }
-    }
+    data:{labels:rd.map(d=>fmtDateShort(prevDate(d))),datasets:[{label:'Caídas <94%',data:evData,backgroundColor:evData.map(v=>v==null?'#1E3048':v>10?'rgba(217,64,64,.6)':v>5?'rgba(201,139,10,.6)':'rgba(29,158,117,.5)'),borderRadius:3}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y} caídas < 94%`}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:10},grid:{display:false}},y:{ticks:{color:'#6B8BAD',font:{size:9}},grid:{color:'#1E3048'},beginAtZero:true}}}
   });
 
-  // ── SpO2 mínimo del mes ──────────────────────────────────────────────────
+  // SpO2 mensual
   const mDays=monthsMap[selectedMonth]||[];
   const mSpo2=mDays.map(d=>summaries[d]?.spo2_min??null);
   dc('spo2Month');
   document.getElementById('monthChartTitle').textContent=`SpO2 mínimo — ${fmtMonthLabel(selectedMonth)}`;
   charts.spo2Month=new Chart(document.getElementById('spo2MonthChart'),{
     type:'bar',
-    data:{
-      labels:mDays.map(d=>new Date(d+'T12:00:00').getDate()),
-      datasets:[{label:'SpO2 mín',data:mSpo2,backgroundColor:mSpo2.map(v=>sc(v)+'CC'),borderColor:mSpo2.map(v=>sc(v)),borderWidth:1,borderRadius:3}]
-    },
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false}},
-      scales:{
-        x:{ticks:{color:'#6B8BAD',font:{size:9}},grid:{display:false}},
-        y:{min:75,max:100,ticks:{color:'#6B8BAD',font:{size:9}},grid:{color:'#1E3048'}},
-      }
-    },
+    data:{labels:mDays.map(d=>new Date(prevDate(d)+'T12:00:00').getDate()),datasets:[{label:'SpO2 mín',data:mSpo2,backgroundColor:mSpo2.map(v=>sc(v)+'CC'),borderColor:mSpo2.map(v=>sc(v)),borderWidth:1,borderRadius:3}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9}},grid:{display:false}},y:{min:75,max:100,ticks:{color:'#6B8BAD',font:{size:9}},grid:{color:'#1E3048'}}}},
     plugins:[rlPlugin('rl2',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
-  document.getElementById('footer').textContent=`Apple Watch de Sacramento · ${fmtDateLong(selectedDate)}`;
+  document.getElementById('footer').textContent=`Noche del ${fmtDateLong(pd)} · Apple Watch de Sacramento`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  PDF
+//  PDF — fondo blanco, estilo informe médico
 // ══════════════════════════════════════════════════════════════════════════
 function openPdfModal(){
-  const opts=document.getElementById('pdfOptions');opts.innerHTML='';
-  pdfSelectedRange=null;
+  const opts=document.getElementById('pdfOptions');opts.innerHTML='';pdfSelectedRange=null;
   const ranges=[
-    {label:'Este mes',         days:()=>monthsMap[selectedMonth]||[]},
-    {label:'Últimos 30 días',  days:()=>{const c=new Date();c.setDate(c.getDate()-30);return allDays.filter(d=>d>=c.toISOString().substring(0,10));}},
-    {label:'Últimos 3 meses',  days:()=>{const c=new Date();c.setMonth(c.getMonth()-3);return allDays.filter(d=>d>=c.toISOString().substring(0,10));}},
+    {label:'Este mes',days:()=>monthsMap[selectedMonth]||[]},
+    {label:'Últimos 30 días',days:()=>{const c=new Date();c.setDate(c.getDate()-30);return allDays.filter(d=>d>=c.toISOString().substring(0,10));}},
+    {label:'Últimos 3 meses',days:()=>{const c=new Date();c.setMonth(c.getMonth()-3);return allDays.filter(d=>d>=c.toISOString().substring(0,10));}},
     {label:`Todo (${allDays.length} días)`,days:()=>allDays,warn:allDays.length>90},
   ];
   ranges.forEach(r=>{
@@ -670,232 +657,127 @@ async function generatePDF(){
   try{
     const{jsPDF}=window.jspdf;
     const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-    const W=210, mg=14, cW=W-mg*2;
-    let y=0, pageNum=0;
-
-    // ── Paleta limpia para impresión ───────────────────────────────────────
-    const BLACK  =[20,20,20];
-    const GRAY1  =[80,80,80];     // texto secundario
-    const GRAY2  =[140,140,140];  // texto débil
-    const LGRAY  =[240,240,240];  // fondo fila par / cabecera sección
-    const BORDER =[210,210,210];  // líneas de tabla
-    const RED    =[200,40,40];    // crítico
-    const ORANGE =[180,110,0];    // bajo
-    const GREEN  =[30,140,80];    // normal / bueno
+    const W=210,mg=14,cW=W-mg*2;let y=0,pageNum=0;
+    const BLACK=[20,20,20],GRAY1=[80,80,80],GRAY2=[150,150,150],LGRAY=[240,240,240],BORDER=[210,210,210];
+    const RED=[200,40,40],ORANGE=[180,110,0],GREEN=[30,140,80];
 
     function header(){
       pageNum++;
-      // Banda superior fina
       doc.setFillColor(30,30,30);doc.rect(0,0,W,8,'F');
       doc.setFontSize(7);doc.setFont('helvetica','normal');doc.setTextColor(180,180,180);
       doc.text('INFORME DE SALUD NOCTURNA · SACRAMENTO',mg,5.5);
-      doc.text(`Página ${pageNum}`,W-mg,5.5,{align:'right'});
-      y=16;
+      doc.text(`Página ${pageNum}`,W-mg,5.5,{align:'right'});y=16;
     }
     function newPage(){doc.addPage();header();}
     function cy(n=10){if(y+n>286)newPage();}
+    function stitle(t){cy(12);doc.setFillColor(...LGRAY);doc.rect(mg,y,cW,7,'F');doc.setDrawColor(...BORDER);doc.setLineWidth(0.1);doc.rect(mg,y,cW,7,'S');doc.setFontSize(8);doc.setFont('helvetica','bold');doc.setTextColor(...GRAY1);doc.text(t.toUpperCase(),mg+3,y+4.8);y+=11;}
+    function divider(){cy(3);doc.setDrawColor(...BORDER);doc.setLineWidth(0.1);doc.line(mg,y,W-mg,y);y+=3;}
 
-    // ── Sección título ─────────────────────────────────────────────────────
-    function sectionTitle(title){
-      cy(12);
-      doc.setFillColor(...LGRAY);doc.rect(mg,y,cW,7,'F');
-      doc.setDrawColor(...BORDER);doc.setLineWidth(0.1);doc.rect(mg,y,cW,7,'S');
-      doc.setFontSize(8);doc.setFont('helvetica','bold');doc.setTextColor(...GRAY1);
-      doc.text(title.toUpperCase(),mg+3,y+4.8);
-      y+=11;
-    }
-
-    // ── Línea divisoria ────────────────────────────────────────────────────
-    function divider(){
-      cy(3);
-      doc.setDrawColor(...BORDER);doc.setLineWidth(0.1);
-      doc.line(mg,y,W-mg,y);
-      y+=3;
-    }
-
-    // ── PORTADA ────────────────────────────────────────────────────────────
     header();
-
-    // Título principal
-    doc.setFontSize(24);doc.setFont('helvetica','bold');doc.setTextColor(...BLACK);
-    doc.text('Informe de salud nocturna',mg,y+10);
-    doc.setFontSize(12);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);
-    doc.text('Apple Watch · Sacramento',mg,y+19);
-    y+=28;
-
-    // Línea decorativa
-    doc.setDrawColor(30,30,30);doc.setLineWidth(0.5);doc.line(mg,y,mg+60,y);
-    y+=6;
-
-    // Metadatos
-    doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);
     const days=pdfSelectedRange;
-    doc.text(`Generado el ${new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`,mg,y);y+=5;
-    doc.text(`Período analizado: ${fmtDateMed(days[0])} — ${fmtDateMed(days[days.length-1])}`,mg,y);y+=5;
-    doc.text(`Total de días: ${days.length}`,mg,y);y+=12;
-
-    // Bloque resumen con borde
     const crit=days.filter(d=>summaries[d]?.spo2_min!=null&&summaries[d].spo2_min<90);
-    const warn=days.filter(d=>summaries[d]?.spo2_min!=null&&summaries[d].spo2_min<94&&summaries[d].spo2_min>=90);
-    const critEv=days.reduce((s,d)=>s+(summaries[d]?.ev90||0),0);
+    const warnD=days.filter(d=>summaries[d]?.spo2_min!=null&&summaries[d].spo2_min>=90&&summaries[d].spo2_min<94);
+
+    setProgress(10,'Portada…');
+    doc.setFontSize(24);doc.setFont('helvetica','bold');doc.setTextColor(...BLACK);doc.text('Informe de salud nocturna',mg,y+10);
+    doc.setFontSize(12);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);doc.text('Apple Watch · Sacramento',mg,y+19);y+=28;
+    doc.setDrawColor(30,30,30);doc.setLineWidth(0.5);doc.line(mg,y,mg+60,y);y+=6;
+    doc.setFontSize(9);doc.setTextColor(...GRAY1);
+    doc.text(`Generado el ${new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`,mg,y);y+=5;
+    doc.text(`Período: ${fmtDateMed(prevDate(days[0]))} — ${fmtDateMed(prevDate(days[days.length-1]))}`,mg,y);y+=5;
+    doc.text(`Total de noches: ${days.length}`,mg,y);y+=12;
 
     doc.setDrawColor(...BORDER);doc.setLineWidth(0.3);doc.roundedRect(mg,y,cW,28,2,2,'S');
-
-    const statCols=[[0,'Días analizados',days.length,BLACK],[cW/3,'Noches SpO2 < 94%',warn.length+crit.length,warn.length+crit.length>0?ORANGE:GREEN],[cW*2/3,'Noches SpO2 < 90%',crit.length,crit.length>0?RED:GREEN]];
-    statCols.forEach(([x,lbl,val,col])=>{
+    [[0,days.length+' noches','analizadas',BLACK],[cW/3,warnD.length+crit.length+' noches','SpO2 < 94%',warnD.length+crit.length>0?ORANGE:GREEN],[cW*2/3,crit.length+' noches','SpO2 < 90% crítico',crit.length>0?RED:GREEN]].forEach(([x,v,l,c])=>{
       const cx=mg+x+cW/6;
-      doc.setFontSize(20);doc.setFont('helvetica','bold');doc.setTextColor(...col);
-      doc.text(String(val),cx,y+14,{align:'center'});
-      doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY2);
-      doc.text(lbl,cx,y+21,{align:'center'});
+      doc.setFontSize(18);doc.setFont('helvetica','bold');doc.setTextColor(...c);doc.text(v,cx,y+13,{align:'center'});
+      doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY2);doc.text(l,cx,y+20,{align:'center'});
     });
     y+=36;
 
-    if(critEv>0){
-      doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(...RED);
-      doc.text(`⚠  Total de eventos SpO2 < 90% registrados: ${critEv}`,mg,y);
-      y+=8;
-    }
-
-    // ── TABLA RESUMEN ──────────────────────────────────────────────────────
-    setProgress(20,'Generando tabla…');
-    sectionTitle('Resumen por día');
-
-    // Cabecera de tabla
-    const TC={a:0,b:34,c:51,d:67,e:86,f:104,g:123,h:143,i:161};
+    setProgress(20,'Tabla resumen…');
+    stitle('Resumen por noche');
+    const TC={a:0,b:36,c:53,d:69,e:88,f:107,g:126,h:146,i:164};
     doc.setFillColor(50,50,50);doc.rect(mg,y-1,cW,7,'F');
     doc.setFontSize(7.5);doc.setFont('helvetica','bold');doc.setTextColor(255,255,255);
-    [['Fecha',TC.a],['SpO2 mín',TC.b],['Prom',TC.c],['Sueño',TC.d],['Efic.',TC.e],['FC rep.',TC.f],['Perturb.',TC.g],['Caídas',TC.h],['Resp.',TC.i]]
-      .forEach(([h,x])=>doc.text(h,mg+x,y+4));
+    [['Noche del',TC.a],['SpO2 mín',TC.b],['Prom',TC.c],['Sueño',TC.d],['Efic.',TC.e],['FC rep.',TC.f],['Perturb.',TC.g],['Caídas',TC.h],['Resp.',TC.i]].forEach(([h,x])=>doc.text(h,mg+x,y+4));
     y+=9;
 
     for(let di=0;di<days.length;di++){
-      if(di%20===0){setProgress(20+Math.round(di/days.length*50),`Procesando día ${di+1}/${days.length}…`);await new Promise(r=>setTimeout(r,0));}
-      cy(6.5);
-      const d=days[di],s=summaries[d];if(!s)continue;
+      if(di%20===0){setProgress(20+Math.round(di/days.length*50),`Día ${di+1}/${days.length}…`);await new Promise(r=>setTimeout(r,0));}
+      cy(6.5);const d=days[di],s=summaries[d];if(!s)continue;
       const{sleep,vitals,spo2_min,spo2_avg,ev94,ev90}=s;
-      const isCrit=spo2_min!=null&&spo2_min<90;
-      const isWarn=spo2_min!=null&&spo2_min>=90&&spo2_min<94;
+      const isCrit=spo2_min!=null&&spo2_min<90,isWarn=spo2_min!=null&&spo2_min>=90&&spo2_min<94;
       const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
       const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
+      const bd=vitals?.breathing_disturbances;
 
-      // Fila alternada (gris muy claro en pares)
       if(di%2===0){doc.setFillColor(248,248,248);doc.rect(mg,y-4.5,cW,6.5,'F');}
-
-      // Indicador lateral para filas críticas
       if(isCrit){doc.setFillColor(...RED);doc.rect(mg,y-4.5,2,6.5,'F');}
       else if(isWarn){doc.setFillColor(...ORANGE);doc.rect(mg,y-4.5,2,6.5,'F');}
 
       doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...BLACK);
-      doc.text(fmtDateShort(d),mg+TC.a+3,y);
-
-      // SpO2 mínimo con color
-      doc.setFont('helvetica','bold');
-      doc.setTextColor(...(isCrit?RED:isWarn?ORANGE:GREEN));
+      doc.text(fmtDateShort(prevDate(d)),mg+TC.a+3,y);
+      doc.setFont('helvetica','bold');doc.setTextColor(...(isCrit?RED:isWarn?ORANGE:GREEN));
       doc.text(spo2_min!=null?spo2_min+'%':'–',mg+TC.b,y);
-
       doc.setFont('helvetica','normal');doc.setTextColor(...BLACK);
       doc.text(spo2_avg!=null?spo2_avg+'%':'–',mg+TC.c,y);
       doc.text(fmtH(sleep?.total_sleep),mg+TC.d,y);
-      doc.setTextColor(eff!=null?(eff>=85?GREEN[0]:eff>=75?ORANGE[0]:RED[0]):GRAY2[0],eff!=null?(eff>=85?GREEN[1]:eff>=75?ORANGE[1]:RED[1]):GRAY2[1],eff!=null?(eff>=85?GREEN[2]:eff>=75?ORANGE[2]:RED[2]):GRAY2[2]);
+      doc.setTextColor(...(eff!=null?(eff>=85?GREEN:eff>=75?ORANGE:RED):GRAY2));
       doc.text(eff!=null?eff+'%':'–',mg+TC.e,y);
       doc.setTextColor(...BLACK);
       doc.text(vitals?.resting_heart_rate!=null?Math.round(vitals.resting_heart_rate)+' bpm':'–',mg+TC.f,y);
-      const bd=vitals?.breathing_disturbances;
       doc.setTextColor(...(bd>15?RED:bd>10?ORANGE:BLACK));
       doc.text(bd!=null?bd.toFixed(1):'–',mg+TC.g,y);
       doc.setTextColor(...(ev94>10?RED:ev94>5?ORANGE:BLACK));
       doc.text(ev94!=null?String(ev94):'–',mg+TC.h,y);
       doc.setTextColor(...BLACK);
       doc.text(vitals?.respiratory_rate_avg!=null?Math.round(vitals.respiratory_rate_avg)+'rpm':'–',mg+TC.i,y);
-
-      // Línea inferior fina
       doc.setDrawColor(...BORDER);doc.setLineWidth(0.05);doc.line(mg,y+2,W-mg,y+2);
       y+=6.5;
     }
 
-    // ── EVENTOS CRÍTICOS ──────────────────────────────────────────────────
     setProgress(75,'Eventos críticos…');await new Promise(r=>setTimeout(r,0));
     const daysWithEvents=days.filter(d=>summaries[d]?.ev94>0);
     if(daysWithEvents.length){
-      cy(20);sectionTitle('Detalle de eventos SpO2 por debajo del 94%');
-      doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(...GRAY2);
-      doc.text('Los días marcados con ■ en rojo tuvieron caídas por debajo del 90% (crítico).',mg,y);y+=8;
-
+      cy(20);stitle('Detalle de eventos SpO2 por debajo del 94%');
       for(const d of daysWithEvents){
         const s=summaries[d];cy(14);
-
-        // Cabecera del día
-        doc.setFillColor(...(s.ev90>0?[255,245,245]:[245,245,245]));
-        doc.rect(mg,y-2,cW,9,'F');
+        doc.setFillColor(...(s.ev90>0?[255,245,245]:[245,245,245]));doc.rect(mg,y-2,cW,9,'F');
         if(s.ev90>0){doc.setFillColor(...RED);doc.rect(mg,y-2,3,9,'F');}
-        doc.setFontSize(9.5);doc.setFont('helvetica','bold');doc.setTextColor(...BLACK);
-        doc.text(fmtDateMed(d),mg+5,y+4.5);
+        doc.setFontSize(9.5);doc.setFont('helvetica','bold');doc.setTextColor(...BLACK);doc.text(`Noche del ${fmtDateMed(prevDate(d))}`,mg+5,y+4.5);
         doc.setFontSize(8.5);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);
-        doc.text(`SpO2 mín: ${s.spo2_min}%   Caídas <94%: ${s.ev94}   Caídas <90%: ${s.ev90}`,mg+60,y+4.5);
+        doc.text(`SpO2 mín: ${s.spo2_min}%   Caídas <94%: ${s.ev94}   Caídas <90%: ${s.ev90}`,mg+65,y+4.5);
         y+=13;
-
         if(dayDetail[d]){
-          const evts=dayDetail[d].spo2.filter(p=>p.value<94).sort((a,b)=>a.time.localeCompare(b.time));
-          // Cabecera mini-tabla
           doc.setFontSize(7.5);doc.setFont('helvetica','bold');doc.setTextColor(...GRAY2);
-          doc.text('Hora',mg+4,y);doc.text('SpO2',mg+22,y);doc.text('Nivel',mg+36,y);
-          y+=5;
-          evts.forEach(ev=>{
-            cy(5);
-            const isCrit=ev.value<90;
-            doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);
-            doc.text(ev.time,mg+4,y);
-            doc.setFont('helvetica','bold');doc.setTextColor(...(isCrit?RED:ORANGE));
-            doc.text(ev.value+'%',mg+22,y);
-            doc.setFont('helvetica','normal');doc.setTextColor(...(isCrit?RED:ORANGE));
-            doc.text(isCrit?'CRÍTICO':'Bajo',mg+36,y);
-            doc.setTextColor(...BORDER);doc.setLineWidth(0.05);doc.line(mg+4,y+1.5,mg+70,y+1.5);
-            y+=5;
+          doc.text('Hora',mg+4,y);doc.text('SpO2',mg+22,y);doc.text('Nivel',mg+38,y);y+=5;
+          dayDetail[d].spo2.filter(p=>p.value<94).sort((a,b)=>a.time.localeCompare(b.time)).forEach(ev=>{
+            cy(5);const isCrit=ev.value<90;
+            doc.setFontSize(8.5);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);doc.text(ev.time,mg+4,y);
+            doc.setFont('helvetica','bold');doc.setTextColor(...(isCrit?RED:ORANGE));doc.text(ev.value+'%',mg+22,y);
+            doc.setFont('helvetica','normal');doc.text(isCrit?'CRÍTICO':'Bajo',mg+38,y);
+            doc.setTextColor(...BORDER);doc.setLineWidth(0.05);doc.line(mg+4,y+1.5,mg+70,y+1.5);y+=5;
           });
         }else{
           doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(...GRAY2);
-          doc.text('Abre este día en el dashboard para ver el detalle hora a hora.',mg+4,y);y+=6;
+          doc.text('Abre este día en el dashboard para ver el detalle.',mg+4,y);y+=5.5;
         }
         y+=4;divider();
       }
     }
 
-    // ── NOTA MÉDICA ────────────────────────────────────────────────────────
     setProgress(95,'Nota médica…');
-    cy(55);sectionTitle('Referencia clínica');
-    const notas=[
-      ['SpO2 (saturación de oxígeno en sangre):',''],
-      ['  ≥ 94%','Normal'],
-      ['  90 – 93%','Bajo — se recomienda seguimiento médico'],
-      ['  < 90%','Crítico — consultar con médico'],
-      ['',''],
-      ['Eficiencia del sueño:',''],
-      ['  > 85%','Normal'],
-      ['  75 – 84%','Mejorable'],
-      ['  < 75%','Baja — valorar higiene del sueño'],
-      ['',''],
-      ['Frecuencia respiratoria durante el sueño: normal 12–20 resp/min.',''],
-      ['Perturbaciones respiratorias > 15/hora: posible indicador de apnea del sueño.',''],
-      ['',''],
-      ['Este informe ha sido generado automáticamente. No sustituye el criterio médico.',''],
-    ];
-    notas.forEach(([lbl,val])=>{
-      cy(5);
-      doc.setFontSize(8.5);doc.setFont('helvetica',lbl.startsWith('  ')?'normal':'bold');
-      doc.setTextColor(...(lbl.startsWith('  ')?GRAY1:BLACK));
-      doc.text(lbl,mg,y);
-      if(val){
-        doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);
-        doc.text(val,mg+45,y);
-      }
-      y+=5;
+    cy(55);stitle('Referencia clínica');
+    [['SpO2 (saturación de oxígeno):',''],['  ≥ 94%','Normal'],['  90 – 93%','Bajo — seguimiento recomendado'],['  < 90%','Crítico — consultar médico'],['',''],['Eficiencia del sueño:',''],['  > 85%','Normal'],['  75 – 84%','Mejorable'],['  < 75%','Baja — valorar higiene del sueño'],['',''],['Frecuencia respiratoria: normal 12–20 resp/min durante el sueño.',''],['Perturbaciones > 15/hora: posible indicador de apnea del sueño.',''],['',''],['Informe generado automáticamente. No sustituye criterio médico.','']].forEach(([l,v])=>{
+      cy(5);doc.setFontSize(8.5);doc.setFont('helvetica',l.startsWith('  ')?'normal':'bold');doc.setTextColor(...(l.startsWith('  ')?GRAY1:BLACK));
+      doc.text(l,mg,y);if(v){doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);doc.text(v,mg+46,y);}y+=5;
     });
 
     setProgress(100,'Guardando…');await new Promise(r=>setTimeout(r,100));
     doc.save(`informe-salud-sacramento-${new Date().toISOString().substring(0,10)}.pdf`);
     closePdfModal();
-  }catch(err){alert('Error generando PDF: '+err.message);}
+  }catch(err){alert('Error: '+err.message);}
   finally{document.getElementById('pdfGenBtn').disabled=false;}
 }
 
@@ -908,11 +790,7 @@ async function init(){
   try{
     await loadSummaries();
     document.getElementById('loader').classList.add('hidden');
-    if(!allDays.length){
-      document.getElementById('errorDiv').classList.remove('hidden');
-      document.getElementById('errorDiv').textContent='No hay datos todavía.';
-      return;
-    }
+    if(!allDays.length){document.getElementById('errorDiv').classList.remove('hidden');document.getElementById('errorDiv').textContent='No hay datos todavía.';return;}
     document.getElementById('content').classList.remove('hidden');
     selectedDate=allDays[allDays.length-1];
     selectedMonth=selectedDate.substring(0,7);
