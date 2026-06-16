@@ -18,6 +18,8 @@
   .header-actions{display:flex;gap:8px;}
   .btn{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 16px;border-radius:20px;cursor:pointer;font-size:12px;transition:all .2s;white-space:nowrap;}
   .btn:hover{border-color:var(--muted);color:var(--text);}
+  .btn-csv{border-color:#1A9E8F55;color:#1A9E8F;}
+  .btn-csv:hover{border-color:#1A9E8F;background:#1A9E8F15;}
   .btn-pdf{border-color:#C98B0A55;color:#C98B0A;}
   .btn-pdf:hover{border-color:#C98B0A;background:#C98B0A15;}
   .btn-today{border-color:var(--good);color:var(--good);padding:6px 14px;}
@@ -136,6 +138,7 @@
       <h1>Dashboard de salud</h1>
     </div>
     <div class="header-actions">
+      <button class="btn btn-csv" onclick="exportCSV()">↓ CSV</button>
       <button class="btn btn-pdf" onclick="openPdfModal()">↓ PDF</button>
       <button class="btn" onclick="init()">↺ Actualizar</button>
     </div>
@@ -220,17 +223,20 @@
 
     <!-- SpO2 + FC -->
     <div class="dual-panel">
-      <div class="dual-panel-title" id="dualTitle">SpO2 y FC durante el sueño</div>
-      <div class="dual-sleep-label" id="dualSleepLabel"></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+        <div>
+          <div class="dual-panel-title" id="dualTitle">SpO2 y FC durante el sueño</div>
+          <div class="dual-sleep-label" id="dualSleepLabel"></div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;margin-top:2px">
+          <button id="spo2ModalBtn" onclick="showSpo2Modal()" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:5px 12px;border-radius:20px;cursor:pointer;font-size:11px;white-space:nowrap">📋 Ver lecturas</button>
+          <button onclick="refreshCharts()" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:5px 12px;border-radius:20px;cursor:pointer;font-size:11px;white-space:nowrap">↺ Recargar</button>
+        </div>
+      </div>
       <div class="dual-charts">
-        <!-- SpO2 — clic para ver todas las lecturas -->
         <div class="dual-col">
-          <div class="dual-col-title" style="justify-content:space-between;align-items:center">
-            <span style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:12px;height:2px;background:var(--good);border-radius:1px"></span>Saturación O₂ (SpO2)</span>
-            <span style="display:flex;gap:6px">
-              <button onclick="refreshCharts()" title="Recargar datos" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:2px 8px;border-radius:20px;cursor:pointer;font-size:11px">↺</button>
-              <button id="spo2ModalBtn" onclick="showSpo2Modal()" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:2px 10px;border-radius:20px;cursor:pointer;font-size:10px">Ver lecturas →</button>
-            </span>
+          <div class="dual-col-title">
+            <span style="display:inline-block;width:12px;height:2px;background:var(--good);border-radius:1px"></span>Saturación O₂ (SpO2)
           </div>
           <div id="spo2Wrap" style="height:200px;position:relative">
             <div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>
@@ -241,9 +247,8 @@
           </div>
         </div>
         <div class="dual-col">
-          <div class="dual-col-title" style="justify-content:space-between;align-items:center">
-            <span style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:12px;height:2px;background:var(--pink);border-radius:1px"></span>Frecuencia cardíaca</span>
-            <button onclick="refreshCharts()" title="Recargar datos" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:2px 8px;border-radius:20px;cursor:pointer;font-size:11px">↺</button>
+          <div class="dual-col-title">
+            <span style="display:inline-block;width:12px;height:2px;background:var(--pink);border-radius:1px"></span>Frecuencia cardíaca
           </div>
           <div style="height:200px;position:relative" id="hrWrap">
             <div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>
@@ -792,6 +797,61 @@ async function generatePDF(){
     closePdfModal();
   }catch(err){alert('Error: '+err.message);}
   finally{document.getElementById('pdfGenBtn').disabled=false;}
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════
+//  EXPORTAR CSV
+// ══════════════════════════════════════════════════════════════════════════
+function exportCSV(){
+  if(!allDays.length)return;
+
+  const headers=[
+    'Fecha BD','Noche del','SpO2 mín (%)','SpO2 prom (%)','Caídas <94%','Caídas <90%',
+    'Sueño total (h)','Sueño profundo (h)','Sueño REM (h)','Sueño ligero (h)','Despierto (h)','Eficiencia sueño (%)',
+    'Hora inicio sueño','Hora fin sueño',
+    'FC en reposo (bpm)','VFC (ms)','Perturbaciones (/h)','Frec. respiratoria (rpm)','Temp. muñeca (°C)'
+  ];
+
+  const rows=allDays.map(d=>{
+    const s=summaries[d];if(!s)return null;
+    const{sleep,vitals,spo2_min,spo2_avg,ev94,ev90}=s;
+    const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
+    const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
+    return [
+      d,
+      prevDate(d),
+      spo2_min??'',
+      spo2_avg??'',
+      ev94??'',
+      ev90??'',
+      sleep?.total_sleep?.toFixed(2)??'',
+      sleep?.deep?.toFixed(2)??'',
+      sleep?.rem?.toFixed(2)??'',
+      sleep?.core?.toFixed(2)??'',
+      sleep?.awake?.toFixed(2)??'',
+      eff??'',
+      sleep?.sleep_start?.substring(11,16)??'',
+      sleep?.sleep_end?.substring(11,16)??'',
+      vitals?.resting_heart_rate!=null?Math.round(vitals.resting_heart_rate):'',
+      vitals?.hrv_avg?.toFixed(1)??'',
+      vitals?.breathing_disturbances?.toFixed(1)??'',
+      vitals?.respiratory_rate_avg!=null?Math.round(vitals.respiratory_rate_avg):'',
+      vitals?.wrist_temperature?.toFixed(1)??'',
+    ];
+  }).filter(Boolean);
+
+  const csv=[headers,...rows].map(r=>r.map(v=>
+    typeof v==='string'&&v.includes(',') ? `"${v}"` : v
+  ).join(',')).join('\n');
+
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`sacramento-salud-${new Date().toISOString().substring(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Refresca solo las gráficas SpO2 y FC del día seleccionado ──────────────
