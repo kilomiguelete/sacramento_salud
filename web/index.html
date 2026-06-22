@@ -603,6 +603,20 @@ async function loadSummaries(){
     summaries[d]={sleep:sleepByDate[d]||null,vitals:vitalsByDate[d]||null,...agg};
   }
   allDays=[...dates].sort();
+
+  // Añadir un "día virtual" = día siguiente al último con datos.
+  // Su prevDate es el último día natural (ej. 22), que SÍ tiene FC aunque su
+  // madrugada (del día 23) todavía no exista. Permite ver el día más reciente.
+  if(allDays.length){
+    const ultimo=allDays[allDays.length-1];
+    const siguiente=nextDate(ultimo);
+    if(!dates.has(siguiente)){
+      allDays.push(siguiente);
+      // Marcar como resumen "parcial": sin datos de noche todavía, pero existe
+      summaries[siguiente]={sleep:null,vitals:null,spo2_min:null,spo2_avg:null,ev94:0,ev90:0,parcial:true};
+    }
+  }
+
   monthsMap={};
   for(const d of allDays){const m=d.substring(0,7);if(!monthsMap[m])monthsMap[m]=[];monthsMap[m].push(d);}
   allMonths=Object.keys(monthsMap).sort();
@@ -665,12 +679,14 @@ function renderDays(){
   for(let d=1;d<=dim;d++){
     const ds=`${selectedMonth}-${String(d).padStart(2,'0')}`;
     const has=!!summaries[ds],s=summaries[ds];
+    const esParcial=s?.parcial;
     const pd=prevDate(ds);
     const pdNum=new Date(pd+'T12:00:00').getDate();
     const btn=document.createElement('button');
     btn.className='day-pill'+(ds===selectedDate?' active':'')+(!has?' no-data':'');
-    btn.title=has?`Noche del ${fmtDateShort(pd)} · Doble clic = forzar recarga`:'Sin datos';
-    btn.innerHTML=`<span class="day-wd">${dayWd(pd)}</span><span class="day-num">${pdNum}</span><span class="day-dot" style="background:${has?sc(s?.spo2_min):'#1E3048'}"></span>`;
+    btn.title=esParcial?`Noche del ${fmtDateShort(pd)} · FC disponible, noche pendiente del día siguiente`:has?`Noche del ${fmtDateShort(pd)} · Doble clic = forzar recarga`:'Sin datos';
+    const dotColor=esParcial?'#6B8BAD':has?sc(s?.spo2_min):'#1E3048';
+    btn.innerHTML=`<span class="day-wd">${dayWd(pd)}</span><span class="day-num">${pdNum}</span><span class="day-dot" style="background:${dotColor}"></span>`;
     if(has){btn.onclick=()=>selectDay(ds);btn.ondblclick=()=>selectDay(ds,true);}
     el.appendChild(btn);
   }
@@ -822,7 +838,11 @@ async function renderDay(){
   const sleepStart=sleep?.sleep_start?.substring(11,16);
   const sleepEnd=sleep?.sleep_end?.substring(11,16);
   document.getElementById('dualTitle').textContent=`SpO2 y FC — Noche del ${fmtDateShort(pd)}`;
-  document.getElementById('dualSleepLabel').textContent=sleepStart&&sleepEnd?`Ventana de sueño: ${sleepStart} – ${sleepEnd}`:'';
+  if(s.parcial){
+    document.getElementById('dualSleepLabel').textContent='⏳ Noche pendiente: los datos del sueño se completarán cuando llegue la madrugada del día siguiente. La FC del día sí está disponible abajo.';
+  }else{
+    document.getElementById('dualSleepLabel').textContent=sleepStart&&sleepEnd?`Ventana de sueño: ${sleepStart} – ${sleepEnd}`:'';
+  }
   // El conteo de levantadas se actualizará tras cargar el detalle
 
   // Score provisional (sin ODI/T90 todavía)
@@ -838,9 +858,10 @@ async function renderDay(){
   await loadDayDetail(selectedDate);
   const{spo2,hr}=dayDetail[selectedDate];
 
-  const spo2Sleep=filterNight(spo2,sleepStart,sleepEnd);
-  const hrSleep=filterNight(hr,sleepStart,sleepEnd);
-  const stepsSleep=filterNight(dayDetail[selectedDate].steps||[],sleepStart,sleepEnd);
+  // En día parcial (sin madrugada todavía) no mostramos la noche, solo la FC 24h
+  const spo2Sleep=s.parcial?[]:filterNight(spo2,sleepStart,sleepEnd);
+  const hrSleep=s.parcial?[]:filterNight(hr,sleepStart,sleepEnd);
+  const stepsSleep=s.parcial?[]:filterNight(dayDetail[selectedDate].steps||[],sleepStart,sleepEnd);
 
   // Mostrar nº de momentos con movimiento nocturno (posibles levantadas)
   if(sleepStart&&sleepEnd){
@@ -875,7 +896,16 @@ async function renderDay(){
   // Habilitar botón modal
   const mb=document.getElementById('spo2ModalBtn');if(mb)mb.disabled=false;
 
+  // En día parcial: mostrar mensaje en las gráficas de noche (la FC 24h sí se renderiza al final)
+  if(s.parcial){
+    const msg='<div class="chart-loading" style="flex-direction:column;gap:6px;text-align:center;padding:0 12px"><div style="font-size:20px">🌙</div><div>La noche se mostrará cuando lleguen los datos de la madrugada del día siguiente.</div></div>';
+    document.getElementById('spo2Wrap').innerHTML=msg;
+    document.getElementById('hrWrap').innerHTML=msg;
+    if(mb)mb.disabled=true;
+  }
+
   // SpO2 chart
+  if(!s.parcial){
   document.getElementById('spo2Wrap').innerHTML='<canvas id="spo2Chart"></canvas>';
   charts.spo2=new Chart(document.getElementById('spo2Chart'),{
     type:'line',
@@ -901,6 +931,7 @@ async function renderDay(){
     const cv=document.getElementById('hrChart'),c2=cv.getContext('2d');
     c2.fillStyle='#6B8BAD';c2.font='12px system-ui';c2.textAlign='center';c2.fillText('Sin datos de FC',cv.width/2,90);
   }
+  } // fin if(!s.parcial) — gráficas de noche
 
   // Fases del sueño con porcentajes
   const totalSleep=sleep?.total_sleep||0;
@@ -944,10 +975,16 @@ async function renderDay(){
     plugins:[rlPlugin('rl2',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
-  document.getElementById('footer').textContent=`Noche del ${fmtDateLong(pd)} · Apple Watch de Sacramento`;
+  document.getElementById('footer').textContent=s.parcial?`Noche del ${fmtDateLong(pd)} · FC del día disponible, noche pendiente · Apple Watch de Sacramento`:`Noche del ${fmtDateLong(pd)} · Apple Watch de Sacramento`;
 
   // Si la vista combinada está activa, redibujarla con el nuevo día
-  if(dualViewMode==='combined')renderCombinedChart();
+  if(dualViewMode==='combined'){
+    if(s.parcial){
+      document.getElementById('combinedWrap').innerHTML='<div class="chart-loading" style="text-align:center;padding:0 12px">🌙 La noche se mostrará cuando lleguen los datos de la madrugada del día siguiente.</div>';
+    }else{
+      renderCombinedChart();
+    }
+  }
 
   // Renderizar FC 24h (usa el mismo dayDetail ya cargado)
   renderHR24();
