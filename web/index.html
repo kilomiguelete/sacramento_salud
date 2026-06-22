@@ -334,6 +334,16 @@
     </div>
 
     <div class="footer" id="footer"></div>
+
+    <!-- Estado de sincronización -->
+    <div id="syncPanel" class="panel" style="margin-top:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="panel-title" style="margin-bottom:0">Estado de sincronización</div>
+        <div id="syncLastTime" style="font-size:11px;color:var(--muted)">–</div>
+      </div>
+      <div style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Últimos archivos procesados</div>
+      <div id="syncFileList" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
   </div>
   <div id="errorDiv" class="error-msg hidden"></div>
 </div>
@@ -1371,6 +1381,50 @@ async function generatePDF(){
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────
+// ── Estado de sincronización ──────────────────────────────────────────────
+async function loadSyncStatus(){
+  try{
+    const{data,error}=await db.from('sync_log')
+      .select('file_name,file_modified,processed_at')
+      .order('processed_at',{ascending:false})
+      .limit(3);
+    if(error||!data){
+      document.getElementById('syncPanel').classList.add('hidden');
+      return;
+    }
+
+    if(!data.length){
+      document.getElementById('syncLastTime').textContent='Sin registros de sincronización';
+      document.getElementById('syncFileList').innerHTML='<div style="font-size:12px;color:var(--muted)">Aún no hay archivos procesados.</div>';
+      return;
+    }
+
+    // Última sincronización (el processed_at más reciente)
+    const last=new Date(data[0].processed_at);
+    const now=new Date();
+    const diffMin=Math.round((now-last)/60000);
+    let ago;
+    if(diffMin<1)ago='hace menos de 1 minuto';
+    else if(diffMin<60)ago=`hace ${diffMin} min`;
+    else if(diffMin<1440)ago=`hace ${Math.round(diffMin/60)} h`;
+    else ago=`hace ${Math.round(diffMin/1440)} días`;
+    document.getElementById('syncLastTime').innerHTML=`Última sincronización: <strong style="color:var(--text)">${last.toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</strong> · ${ago}`;
+
+    // Lista de archivos
+    const fmt=ts=>ts?new Date(ts).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'–';
+    document.getElementById('syncFileList').innerHTML=data.map(f=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border-radius:8px;padding:8px 12px;gap:12px">
+        <div style="font-size:12px;color:var(--text);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.file_name}</div>
+        <div style="font-size:11px;color:var(--muted);flex-shrink:0;text-align:right">
+          <div title="Última modificación del archivo">mod: ${fmt(f.file_modified)}</div>
+          <div title="Procesado el" style="opacity:.7">proc: ${fmt(f.processed_at)}</div>
+        </div>
+      </div>`).join('');
+  }catch(e){
+    document.getElementById('syncPanel').classList.add('hidden');
+  }
+}
+
 async function init(){
   document.getElementById('content').classList.add('hidden');
   document.getElementById('errorDiv').classList.add('hidden');
@@ -1384,6 +1438,7 @@ async function init(){
     selectedDate=allDays[allDays.length-1];
     selectedMonth=selectedDate.substring(0,7);
     renderMonths();renderDays();await renderDay();
+    loadSyncStatus();
   }catch(err){
     document.getElementById('loader').classList.add('hidden');
     document.getElementById('errorDiv').classList.remove('hidden');
