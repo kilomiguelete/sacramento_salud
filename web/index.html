@@ -145,7 +145,7 @@
       <h1>Dashboard de salud</h1>
     </div>
     <div class="header-actions">
-      <button class="btn btn-csv" onclick="exportCSV()">↓ CSV</button>
+      <button class="btn btn-csv" onclick="openCsvModal()">↓ CSV</button>
       <button class="btn btn-pdf" onclick="openPdfModal()">↓ PDF</button>
       <button class="btn" onclick="init()">↺ Actualizar</button>
     </div>
@@ -353,6 +353,35 @@
       </table>
     </div>
     <div class="modal-footer"><button class="btn-cancel" onclick="closeSpo2Modal()">Cerrar</button></div>
+  </div>
+</div>
+
+<!-- Modal CSV personalizado -->
+<div id="csvModal" class="modal-overlay hidden" onclick="if(event.target===this)closeCsvModal()">
+  <div class="modal" style="max-width:480px;max-height:88vh;display:flex;flex-direction:column">
+    <h3>Exportar CSV personalizado</h3>
+    <p style="margin-bottom:14px">Elige el período y los campos a incluir.</p>
+
+    <div style="flex-shrink:0;margin-bottom:16px">
+      <div style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Período</div>
+      <div class="modal-options" id="csvRangeOptions" style="margin-bottom:0"></div>
+    </div>
+
+    <div style="flex:1;overflow-y:auto;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Campos a incluir</div>
+        <div style="display:flex;gap:8px">
+          <button onclick="toggleAllCsvFields(true)" style="background:transparent;border:none;color:var(--good);font-size:11px;cursor:pointer">Todos</button>
+          <button onclick="toggleAllCsvFields(false)" style="background:transparent;border:none;color:var(--muted);font-size:11px;cursor:pointer">Ninguno</button>
+        </div>
+      </div>
+      <div id="csvFieldList"></div>
+    </div>
+
+    <div class="modal-footer" style="flex-shrink:0">
+      <button class="btn-cancel" onclick="closeCsvModal()">Cancelar</button>
+      <button class="btn-primary" id="csvGenBtn" onclick="generateCustomCSV()">Descargar CSV</button>
+    </div>
   </div>
 </div>
 
@@ -1013,6 +1042,88 @@ function downloadMonthCSV(){
   const rows=[['Noche del','SpO2 mín (%)','SpO2 prom (%)','Caídas <94%','Caídas <90%']];
   mDays.forEach(d=>{const s=summaries[d];rows.push([prevDate(d),s?.spo2_min??'',s?.spo2_avg??'',s?.ev94??'',s?.ev90??'']);});
   downloadCSVFile(rows,`spo2-mensual-${selectedMonth}.csv`);
+}
+
+// ── Exportador CSV personalizado ──────────────────────────────────────────
+let csvSelectedRange=null;
+
+// Definición de todos los campos disponibles
+const CSV_FIELDS=[
+  {key:'date_bd',    label:'Fecha BD (amanecer)',     get:d=>d},
+  {key:'date_night', label:'Noche del (DIA-1)',        get:d=>prevDate(d)},
+  {key:'spo2_min',   label:'SpO2 mínimo (%)',          get:d=>summaries[d]?.spo2_min??''},
+  {key:'spo2_avg',   label:'SpO2 promedio (%)',        get:d=>summaries[d]?.spo2_avg??''},
+  {key:'ev94',       label:'Caídas < 94%',             get:d=>summaries[d]?.ev94??''},
+  {key:'ev90',       label:'Caídas < 90%',             get:d=>summaries[d]?.ev90??''},
+  {key:'sleep_total',label:'Sueño total (h)',          get:d=>summaries[d]?.sleep?.total_sleep?.toFixed(2)??''},
+  {key:'deep',       label:'Sueño profundo (h)',       get:d=>summaries[d]?.sleep?.deep?.toFixed(2)??''},
+  {key:'deep_pct',   label:'% Profundo',               get:d=>{const s=summaries[d]?.sleep;const t=s?.total_sleep||0;return t>0&&s?.deep?Math.round(s.deep/t*100):'';}},
+  {key:'rem',        label:'Sueño REM (h)',            get:d=>summaries[d]?.sleep?.rem?.toFixed(2)??''},
+  {key:'rem_pct',    label:'% REM',                    get:d=>{const s=summaries[d]?.sleep;const t=s?.total_sleep||0;return t>0&&s?.rem?Math.round(s.rem/t*100):'';}},
+  {key:'core',       label:'Sueño ligero (h)',         get:d=>summaries[d]?.sleep?.core?.toFixed(2)??''},
+  {key:'awake',      label:'Tiempo despierto (h)',     get:d=>summaries[d]?.sleep?.awake?.toFixed(2)??''},
+  {key:'efficiency', label:'Eficiencia sueño (%)',     get:d=>{const s=summaries[d]?.sleep;const ib=s?.in_bed>0?s.in_bed:((s?.total_sleep||0)+(s?.awake||0));return s?.total_sleep&&ib>0?Math.round(s.total_sleep/ib*100):'';}},
+  {key:'sleep_start',label:'Hora inicio sueño',        get:d=>summaries[d]?.sleep?.sleep_start?.substring(11,16)??''},
+  {key:'sleep_end',  label:'Hora fin sueño',           get:d=>summaries[d]?.sleep?.sleep_end?.substring(11,16)??''},
+  {key:'rhr',        label:'FC en reposo (bpm)',       get:d=>{const v=summaries[d]?.vitals?.resting_heart_rate;return v!=null?Math.round(v):'';}},
+  {key:'hrv',        label:'VFC (ms)',                 get:d=>summaries[d]?.vitals?.hrv_avg?.toFixed(1)??''},
+  {key:'breathing',  label:'Perturbaciones (/h)',      get:d=>summaries[d]?.vitals?.breathing_disturbances?.toFixed(1)??''},
+  {key:'resp_rate',  label:'Frec. respiratoria (rpm)', get:d=>{const v=summaries[d]?.vitals?.respiratory_rate_avg;return v!=null?Math.round(v):'';}},
+  {key:'temp',       label:'Temp. muñeca (°C)',        get:d=>summaries[d]?.vitals?.wrist_temperature?.toFixed(1)??''},
+];
+
+function openCsvModal(){
+  csvSelectedRange=null;
+
+  // Opciones de período
+  const ro=document.getElementById('csvRangeOptions');ro.innerHTML='';
+  const ranges=[
+    {label:'Este mes',days:()=>monthsMap[selectedMonth]||[]},
+    {label:'Últimos 30 días',days:()=>{const c=new Date();c.setDate(c.getDate()-30);return allDays.filter(d=>d>=c.toISOString().substring(0,10));}},
+    {label:'Últimos 3 meses',days:()=>{const c=new Date();c.setMonth(c.getMonth()-3);return allDays.filter(d=>d>=c.toISOString().substring(0,10));}},
+    {label:`Todo el historial (${allDays.length} días)`,days:()=>allDays},
+  ];
+  ranges.forEach((r,i)=>{
+    const days=r.days();
+    const btn=document.createElement('button');btn.className='modal-opt';
+    btn.innerHTML=`<strong>${r.label}</strong> <span style="color:var(--muted);font-size:12px">· ${days.length} días</span>`;
+    btn.onclick=()=>{document.querySelectorAll('#csvRangeOptions .modal-opt').forEach(b=>b.classList.remove('selected'));btn.classList.add('selected');csvSelectedRange=days;updateCsvBtn();};
+    ro.appendChild(btn);
+  });
+
+  // Lista de campos (checkboxes), todos marcados por defecto
+  const fl=document.getElementById('csvFieldList');fl.innerHTML='';
+  CSV_FIELDS.forEach(f=>{
+    const lbl=document.createElement('label');
+    lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;cursor:pointer';
+    lbl.innerHTML=`<input type="checkbox" class="csv-field-cb" value="${f.key}" checked onchange="updateCsvBtn()" style="accent-color:#1A9E8F;width:15px;height:15px"> ${f.label}`;
+    fl.appendChild(lbl);
+  });
+
+  updateCsvBtn();
+  document.getElementById('csvModal').classList.remove('hidden');
+}
+function closeCsvModal(){document.getElementById('csvModal').classList.add('hidden');}
+function toggleAllCsvFields(on){document.querySelectorAll('.csv-field-cb').forEach(cb=>cb.checked=on);updateCsvBtn();}
+function updateCsvBtn(){
+  const anyField=document.querySelectorAll('.csv-field-cb:checked').length>0;
+  document.getElementById('csvGenBtn').disabled=!(csvSelectedRange&&csvSelectedRange.length&&anyField);
+}
+
+function generateCustomCSV(){
+  if(!csvSelectedRange?.length)return;
+  const selectedKeys=[...document.querySelectorAll('.csv-field-cb:checked')].map(cb=>cb.value);
+  if(!selectedKeys.length)return;
+  const fields=CSV_FIELDS.filter(f=>selectedKeys.includes(f.key));
+
+  const rows=[fields.map(f=>f.label)];
+  csvSelectedRange.forEach(d=>{
+    if(!summaries[d])return;
+    rows.push(fields.map(f=>f.get(d)));
+  });
+
+  downloadCSVFile(rows,`sacramento-salud-custom-${new Date().toISOString().substring(0,10)}.csv`);
+  closeCsvModal();
 }
 
 // ══════════════════════════════════════════════════════════════════════════
