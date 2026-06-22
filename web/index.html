@@ -253,12 +253,14 @@
           <div class="dual-sleep-label" id="dualSleepLabel"></div>
         </div>
         <div class="dual-header-btns">
+          <button class="dual-btn" id="viewToggleBtn" onclick="toggleDualView()" style="border-color:#1A9E8F55;color:#1A9E8F">⊞ Superpuestas</button>
           <button class="dual-btn" id="spo2ModalBtn" onclick="showSpo2Modal()">📋 Ver lecturas</button>
           <button class="dual-btn" onclick="downloadSleepCSV()">↓ CSV</button>
           <button class="dual-btn" onclick="refreshCharts()">↺ Recargar</button>
         </div>
       </div>
-      <div class="dual-charts">
+      <!-- Vista separada (dos columnas) -->
+      <div class="dual-charts" id="separateView">
         <div class="dual-col">
           <div class="dual-col-title">
             <span style="display:inline-block;width:12px;height:2px;background:var(--good);border-radius:1px"></span>
@@ -270,7 +272,7 @@
           <div class="legend">
             <div class="legend-item"><span class="legend-line" style="background:var(--warn)"></span>94%</div>
             <div class="legend-item"><span class="legend-line" style="background:var(--bad)"></span>90%</div>
-            <div class="legend-item"><span style="display:inline-block;width:12px;height:12px;background:rgba(122,110,232,0.35);border-radius:2px"></span>Movimiento/pasos</div>
+            <div class="legend-item"><span style="display:inline-block;width:12px;height:12px;background:rgba(230,150,30,0.45);border-radius:2px"></span>Movimiento/pasos</div>
           </div>
         </div>
         <div class="dual-col">
@@ -285,6 +287,19 @@
             <div class="legend-item"><span class="legend-line" style="background:var(--pink)"></span>FC media</div>
             <div class="legend-item"><span class="legend-line" style="background:#C2588035;height:8px;border-radius:2px"></span>Rango</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Vista superpuesta (un solo gráfico) -->
+      <div id="combinedView" class="hidden">
+        <div id="combinedWrap" style="height:260px;position:relative">
+          <div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>
+        </div>
+        <div class="legend" style="justify-content:center">
+          <div class="legend-item"><span class="legend-line" style="background:var(--good)"></span>SpO2 (%)</div>
+          <div class="legend-item"><span class="legend-line" style="background:var(--pink)"></span>FC media (bpm)</div>
+          <div class="legend-item"><span style="display:inline-block;width:12px;height:8px;background:#E69620;border-radius:2px"></span>Pasos</div>
+          <div class="legend-item"><span class="legend-line" style="background:var(--bad)"></span>90% SpO2</div>
         </div>
       </div>
     </div>
@@ -450,6 +465,7 @@ const db=createClient(SUPABASE_URL,SUPABASE_ANON);
 let summaries={},allDays=[],monthsMap={},allMonths=[];
 let selectedMonth=null,selectedDate=null,dayDetail={},charts={};
 let pdfSelectedRange=null;
+let dualViewMode='separate'; // 'separate' o 'combined'
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const fmtH=h=>{if(!h)return'–';const a=Math.floor(h),b=Math.round((h-a)*60);return b>0?`${a}h ${b}m`:`${a}h`;};
@@ -472,7 +488,7 @@ const stepBandsPlugin=(id,labels,steps)=>({id,beforeDraw(ch){
   const{ctx,chartArea:{top,bottom},scales:{x}}=ch;
   const stepTimes=new Set(steps.map(s=>s.time));
   ctx.save();
-  ctx.fillStyle='rgba(122,110,232,0.18)'; // morado translúcido
+  ctx.fillStyle='rgba(230,150,30,0.22)'; // naranja translúcido
   labels.forEach((lbl,idx)=>{
     if(stepTimes.has(lbl)){
       // Ancho de la banda: medio intervalo a cada lado
@@ -887,6 +903,9 @@ async function renderDay(){
 
   document.getElementById('footer').textContent=`Noche del ${fmtDateLong(pd)} · Apple Watch de Sacramento`;
 
+  // Si la vista combinada está activa, redibujarla con el nuevo día
+  if(dualViewMode==='combined')renderCombinedChart();
+
   // Renderizar FC 24h (usa el mismo dayDetail ya cargado)
   renderHR24();
 }
@@ -1013,6 +1032,88 @@ async function refreshHR24(){
   await renderHR24();
 }
 
+// ── Toggle vista separada / superpuesta ───────────────────────────────────
+function toggleDualView(){
+  dualViewMode=dualViewMode==='separate'?'combined':'separate';
+  const sep=document.getElementById('separateView');
+  const comb=document.getElementById('combinedView');
+  const btn=document.getElementById('viewToggleBtn');
+  if(dualViewMode==='combined'){
+    sep.classList.add('hidden');
+    comb.classList.remove('hidden');
+    btn.textContent='⊟ Separadas';
+    renderCombinedChart();
+  }else{
+    comb.classList.add('hidden');
+    sep.classList.remove('hidden');
+    btn.textContent='⊞ Superpuestas';
+    // Las gráficas separadas siguen dibujadas; no hace falta re-renderizar
+  }
+}
+
+// ── Gráfica combinada (SpO2 + FC + pasos superpuestos) ────────────────────
+function renderCombinedChart(){
+  if(!selectedDate||!dayDetail[selectedDate])return;
+  const s=summaries[selectedDate],sleep=s?.sleep;
+  const ss=sleep?.sleep_start?.substring(11,16),se=sleep?.sleep_end?.substring(11,16);
+  const{spo2,hr,steps}=dayDetail[selectedDate];
+  const spo2Sleep=spo2.filter(p=>inSleepWindow(p.time,ss,se));
+  const hrSleep=hr.filter(p=>inSleepWindow(p.time,ss,se));
+  const stepsSleep=(steps||[]).filter(p=>inSleepWindow(p.time,ss,se));
+
+  // Unificar eje de tiempo: todas las horas presentes en cualquier serie
+  const allTimes=[...new Set([...spo2Sleep.map(p=>p.time),...hrSleep.map(p=>p.time),...stepsSleep.map(p=>p.time)])].sort();
+  const spo2Map={};spo2Sleep.forEach(p=>spo2Map[p.time]=p.value);
+  const hrMap={};hrSleep.forEach(p=>hrMap[p.time]=p.avg);
+  const stepsMap={};stepsSleep.forEach(p=>stepsMap[p.time]=p.value);
+
+  dc('combined');
+  document.getElementById('combinedWrap').innerHTML='<canvas id="combinedChart"></canvas>';
+  charts.combined=new Chart(document.getElementById('combinedChart'),{
+    data:{
+      labels:allTimes,
+      datasets:[
+        // Pasos como barras (eje derecho oculto)
+        {type:'bar',label:'Pasos',data:allTimes.map(t=>stepsMap[t]??null),
+         backgroundColor:'rgba(230,150,30,0.55)',borderColor:'#E69620',borderWidth:1,
+         yAxisID:'ySteps',order:3,barThickness:'flex',maxBarThickness:14},
+        // SpO2 línea (eje izquierdo)
+        {type:'line',label:'SpO2',data:allTimes.map(t=>spo2Map[t]??null),
+         borderColor:'#1D9E75',borderWidth:2,
+         pointBackgroundColor:allTimes.map(t=>sc(spo2Map[t])),
+         pointRadius:allTimes.map(t=>{const v=spo2Map[t];return v==null?0:v<90?5:v<94?4:3;}),
+         tension:0.3,spanGaps:true,yAxisID:'ySpo2',order:1,
+         segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}},
+        // FC línea (eje derecho)
+        {type:'line',label:'FC',data:allTimes.map(t=>hrMap[t]!=null?Math.round(hrMap[t]):null),
+         borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,
+         tension:0.3,spanGaps:true,yAxisID:'yHr',order:2},
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{label:ctx=>{
+          if(ctx.parsed.y==null)return null;
+          if(ctx.dataset.label==='SpO2')return `SpO2: ${ctx.parsed.y}%`;
+          if(ctx.dataset.label==='FC')return `FC: ${Math.round(ctx.parsed.y)} bpm`;
+          if(ctx.dataset.label==='Pasos')return `Pasos: ${Math.round(ctx.parsed.y)}`;
+          return null;
+        }}}
+      },
+      scales:{
+        x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:8},grid:{color:'#1E3048'}},
+        ySpo2:{position:'left',min:78,max:100,ticks:{color:'#1D9E75',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'},title:{display:true,text:'SpO2',color:'#1D9E75',font:{size:9}}},
+        yHr:{position:'right',ticks:{color:'#C25880',font:{size:9},callback:v=>v+' bpm'},grid:{display:false},title:{display:true,text:'FC',color:'#C25880',font:{size:9}}},
+        ySteps:{position:'right',display:false,min:0,max:Math.max(40,...stepsSleep.map(p=>p.value))*3},
+      }
+    },
+    plugins:[rlPlugin('rlc',[[94,'#C98B0A'],[90,'#D94040']])]
+  });
+}
+
 // ── Refresca solo las gráficas SpO2 y FC ──────────────────────────────────
 async function refreshCharts(){
   if(!selectedDate)return;
@@ -1052,6 +1153,7 @@ async function refreshCharts(){
   document.getElementById('hrWrap').innerHTML='<canvas id="hrChart"></canvas>';
   if(hrSleep.length){charts.hr=new Chart(document.getElementById('hrChart'),{type:'line',data:{labels:hrSleep.map(p=>p.time),datasets:[{label:'FC máx',data:hrSleep.map(p=>p.max),borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3},{label:'FC mín',data:hrSleep.map(p=>p.min),borderColor:'transparent',pointRadius:0,fill:false,tension:0.3},{label:'FC media',data:hrSleep.map(p=>p.avg),borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb2',hrSleep.map(p=>p.time),stepsSleep)]});}
   const mb=document.getElementById('spo2ModalBtn');if(mb)mb.disabled=false;
+  if(dualViewMode==='combined')renderCombinedChart();
 }
 
 // ── Descargas CSV por gráfica ─────────────────────────────────────────────
