@@ -476,6 +476,7 @@ const fmtDateShort=d=>new Date(d+'T12:00:00').toLocaleDateString('es-ES',{day:'n
 const WD=['do','lu','ma','mi','ju','vi','sá'];
 const dayWd=d=>WD[new Date(d+'T12:00:00').getDay()];
 function prevDate(d){const dt=new Date(d+'T12:00:00');dt.setDate(dt.getDate()-1);return dt.toISOString().substring(0,10);}
+function nextDate(d){const dt=new Date(d+'T12:00:00');dt.setDate(dt.getDate()+1);return dt.toISOString().substring(0,10);}
 function sc(v){if(v==null)return'#1D9E75';if(v<90)return'#D94040';if(v<94)return'#C98B0A';return'#1D9E75';}
 function dc(k){if(charts[k]){charts[k].destroy();delete charts[k];}}
 const rlPlugin=(id,vals)=>({id,afterDraw(ch){
@@ -503,6 +504,25 @@ const stepBandsPlugin=(id,labels,steps)=>({id,beforeDraw(ch){
   ctx.restore();
 }});
 function inSleepWindow(t,start,end){if(!start||!end)return true;if(start<=end)return t>=start&&t<=end;return t>=start||t<=end;}
+// Clave de orden para la noche unida: las lecturas del día anterior (prev=tarde-noche)
+// van antes que las de la madrugada. Devuelve minutos desde el inicio de la tarde-noche.
+function nightSortKey(p){
+  const[h,m]=p.time.split(':').map(Number);
+  const mins=h*60+m;
+  // prev (día X, tarde-noche): tal cual. madrugada (día X+1): +24h para que vaya después.
+  return p.prev ? mins : mins+1440;
+}
+// Filtra y ORDENA las lecturas de la noche unida cruzando medianoche.
+function filterNight(arr,start,end){
+  const inWin=(arr||[]).filter(p=>{
+    if(!start||!end)return true;
+    // prev = tarde-noche del día X: debe estar >= hora de acostarse
+    if(p.prev) return p.time>=start;
+    // madrugada del día X+1: debe estar <= hora de despertar
+    return p.time<=end;
+  });
+  return inWin.sort((a,b)=>nightSortKey(a)-nightSortKey(b));
+}
 
 // ── Métricas clínicas ─────────────────────────────────────────────────────
 
@@ -591,15 +611,38 @@ async function loadSummaries(){
 // ── Detalle bajo demanda ──────────────────────────────────────────────────
 async function loadDayDetail(date,force=false){
   if(dayDetail[date]&&!force)return;
-  const[spo2Res,hrRes,stepsRes]=await Promise.all([
-    db.from('spo2_readings').select('measured_at,value').eq('date',date).order('measured_at'),
-    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',date).order('measured_at'),
-    db.from('step_readings').select('measured_at,value').eq('date',date).order('measured_at'),
+  // date = fila de BD (día del amanecer, X+1). El calendario muestra prevDate(date) = X.
+  // La NOCHE real = tarde-noche del día X (acostarse→24:00) + madrugada del día X+1 (00:00→despertar).
+  // La FC 24h = todo el día natural X completo (00:00→23:59 del día X).
+  const dayX=prevDate(date);        // día natural que muestra el calendario
+  const dayMorning=date;            // madrugada (fila de BD)
+
+  const[spo2Res,hrRes,stepsRes,spo2PrevRes,hrPrevRes,stepsPrevRes,hrDayXRes]=await Promise.all([
+    // Madrugada (día X+1): SpO2, FC, pasos
+    db.from('spo2_readings').select('measured_at,value').eq('date',dayMorning).order('measured_at'),
+    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayMorning).order('measured_at'),
+    db.from('step_readings').select('measured_at,value').eq('date',dayMorning).order('measured_at'),
+    // Tarde-noche (día X): SpO2, FC, pasos — para completar la primera mitad de la noche
+    db.from('spo2_readings').select('measured_at,value').eq('date',dayX).order('measured_at'),
+    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayX).order('measured_at'),
+    db.from('step_readings').select('measured_at,value').eq('date',dayX).order('measured_at'),
+    // FC del día natural X completo (para la gráfica 24h)
+    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayX).order('measured_at'),
   ]);
+
+  // Mapear lecturas conservando si son del día X (prev) o X+1 (madrugada),
+  // para poder ordenarlas correctamente cruzando medianoche.
+  const mapSpo2=(rows,isPrev)=>(rows||[]).map(r=>({time:r.measured_at.substring(11,16),value:parseFloat(r.value),prev:isPrev}));
+  const mapHr=(rows,isPrev)=>(rows||[]).map(r=>({time:r.measured_at.substring(11,16),min:r.min_hr?parseFloat(r.min_hr):null,max:r.max_hr?parseFloat(r.max_hr):null,avg:r.avg_hr?parseFloat(r.avg_hr):null,prev:isPrev}));
+  const mapSteps=(rows,isPrev)=>(rows||[]).map(r=>({time:r.measured_at.substring(11,16),value:parseFloat(r.value),prev:isPrev})).filter(s=>s.value>0);
+
   dayDetail[date]={
-    spo2:(spo2Res.data||[]).map(r=>({time:r.measured_at.substring(11,16),value:parseFloat(r.value)})),
-    hr:(hrRes.data||[]).map(r=>({time:r.measured_at.substring(11,16),min:r.min_hr?parseFloat(r.min_hr):null,max:r.max_hr?parseFloat(r.max_hr):null,avg:r.avg_hr?parseFloat(r.avg_hr):null})),
-    steps:(stepsRes.data||[]).map(r=>({time:r.measured_at.substring(11,16),value:parseFloat(r.value)})).filter(s=>s.value>0),
+    // Noche unida: parte del día X (prev) + madrugada del día X+1
+    spo2:[...mapSpo2(spo2PrevRes.data,true),...mapSpo2(spo2Res.data,false)],
+    hr:[...mapHr(hrPrevRes.data,true),...mapHr(hrRes.data,false)],
+    steps:[...mapSteps(stepsPrevRes.data,true),...mapSteps(stepsRes.data,false)],
+    // FC del día natural X completo (gráfica 24h)
+    hrDayX:mapHr(hrDayXRes.data,false),
   };
 }
 
@@ -664,11 +707,11 @@ function showSpo2Modal(){
   const sleep=s?.sleep;
   const sleepStart=sleep?.sleep_start?.substring(11,16);
   const sleepEnd=sleep?.sleep_end?.substring(11,16);
-  const spo2Sleep=spo2.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
+  const spo2Sleep=filterNight(spo2,sleepStart,sleepEnd);
   const pd=prevDate(selectedDate);
 
   document.getElementById('spo2ModalTitle').textContent=`Lecturas SpO2 — Noche del ${fmtDateLong(pd)}`;
-  document.getElementById('spo2ModalSubtitle').textContent=`${spo2Sleep.length} lecturas durante el sueño (${spo2.length} totales del día)`;
+  document.getElementById('spo2ModalSubtitle').textContent=`${spo2Sleep.length} lecturas durante la noche (unidas de ambos días)`;
 
   const vals=spo2Sleep.map(p=>p.value);
   const minV=vals.length?Math.min(...vals):null;
@@ -795,9 +838,9 @@ async function renderDay(){
   await loadDayDetail(selectedDate);
   const{spo2,hr}=dayDetail[selectedDate];
 
-  const spo2Sleep=spo2.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
-  const hrSleep=hr.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
-  const stepsSleep=(dayDetail[selectedDate].steps||[]).filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
+  const spo2Sleep=filterNight(spo2,sleepStart,sleepEnd);
+  const hrSleep=filterNight(hr,sleepStart,sleepEnd);
+  const stepsSleep=filterNight(dayDetail[selectedDate].steps||[],sleepStart,sleepEnd);
 
   // Mostrar nº de momentos con movimiento nocturno (posibles levantadas)
   if(sleepStart&&sleepEnd){
@@ -951,13 +994,14 @@ function detectHRPeaks(hrData){
 
 async function renderHR24(){
   if(!selectedDate)return;
-  const pd=prevDate(selectedDate);
-  document.getElementById('hr24Title').textContent=`Frecuencia cardíaca 24h — ${fmtDateShort(selectedDate)}`;
+  const pd=prevDate(selectedDate); // día natural X que muestra el calendario
+  document.getElementById('hr24Title').textContent=`Frecuencia cardíaca 24h — ${fmtDateShort(pd)}`;
   document.getElementById('hr24Wrap').innerHTML='<div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>';
   dc('hr24');
 
   await loadDayDetail(selectedDate);
-  const{hr}=dayDetail[selectedDate];
+  // FC del día natural X completo (00:00–23:59), no la ventana de sueño
+  const hr=dayDetail[selectedDate].hrDayX||[];
 
   if(!hr||!hr.length){
     document.getElementById('hr24Wrap').innerHTML='<div class="chart-loading">Sin datos de FC para este día</div>';
@@ -1057,9 +1101,9 @@ function renderCombinedChart(){
   const s=summaries[selectedDate],sleep=s?.sleep;
   const ss=sleep?.sleep_start?.substring(11,16),se=sleep?.sleep_end?.substring(11,16);
   const{spo2,hr,steps}=dayDetail[selectedDate];
-  const spo2Sleep=spo2.filter(p=>inSleepWindow(p.time,ss,se));
-  const hrSleep=hr.filter(p=>inSleepWindow(p.time,ss,se));
-  const stepsSleep=(steps||[]).filter(p=>inSleepWindow(p.time,ss,se));
+  const spo2Sleep=filterNight(spo2,ss,se);
+  const hrSleep=filterNight(hr,ss,se);
+  const stepsSleep=filterNight(steps||[],ss,se);
 
   // Unificar eje de tiempo: todas las horas presentes en cualquier serie
   const allTimes=[...new Set([...spo2Sleep.map(p=>p.time),...hrSleep.map(p=>p.time),...stepsSleep.map(p=>p.time)])].sort();
@@ -1126,9 +1170,9 @@ async function refreshCharts(){
   delete dayDetail[selectedDate];
   await loadDayDetail(selectedDate,true);
   const{spo2,hr}=dayDetail[selectedDate];
-  const spo2Sleep=spo2.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
-  const hrSleep=hr.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
-  const stepsSleep=(dayDetail[selectedDate].steps||[]).filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
+  const spo2Sleep=filterNight(spo2,sleepStart,sleepEnd);
+  const hrSleep=filterNight(hr,sleepStart,sleepEnd);
+  const stepsSleep=filterNight(dayDetail[selectedDate].steps||[],sleepStart,sleepEnd);
 
   // Recalcular métricas
   const odi=computeODI(spo2Sleep,sleep?.total_sleep);
@@ -1174,8 +1218,8 @@ function downloadSleepCSV(){
   const s=summaries[selectedDate],sleep=s?.sleep;
   const ss=sleep?.sleep_start?.substring(11,16),se=sleep?.sleep_end?.substring(11,16);
   const{spo2,hr}=dayDetail[selectedDate];
-  const spo2Sleep=spo2.filter(p=>inSleepWindow(p.time,ss,se));
-  const hrSleep=hr.filter(p=>inSleepWindow(p.time,ss,se));
+  const spo2Sleep=filterNight(spo2,ss,se);
+  const hrSleep=filterNight(hr,ss,se);
   // Combinar por hora
   const byTime={};
   spo2Sleep.forEach(p=>{byTime[p.time]=byTime[p.time]||{};byTime[p.time].spo2=p.value;});
@@ -1189,7 +1233,7 @@ function downloadSleepCSV(){
 // FC 24 horas (todas las lecturas del día con marca de pico)
 function downloadHR24CSV(){
   if(!selectedDate||!dayDetail[selectedDate])return;
-  const{hr}=dayDetail[selectedDate];
+  const hr=dayDetail[selectedDate].hrDayX||[];
   if(!hr||!hr.length)return;
   const hrSorted=[...hr].sort((a,b)=>a.time.localeCompare(b.time));
   const{peaks}=detectHRPeaks(hrSorted);
@@ -1489,7 +1533,7 @@ async function generatePDF(){
         doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);doc.text(`SpO2 mín: ${s.spo2_min}%   Caídas <94%: ${s.ev94}   Caídas <90%: ${s.ev90}`,mg+65,y+4.5);y+=13;
         if(dayDetail[d]){
           const sl=summaries[d]?.sleep;const ss=sl?.sleep_start?.substring(11,16);const se=sl?.sleep_end?.substring(11,16);
-          const spo2Sleep=dayDetail[d].spo2.filter(p=>inSleepWindow(p.time,ss,se));
+          const spo2Sleep=filterNight(dayDetail[d].spo2,ss,se);
           doc.setFontSize(7.5);doc.setFont('helvetica','bold');doc.setTextColor(...GRAY2);doc.text('Hora',mg+4,y);doc.text('SpO2',mg+22,y);doc.text('Nivel',mg+38,y);y+=5;
           spo2Sleep.filter(p=>p.value<94).sort((a,b)=>a.time.localeCompare(b.time)).forEach(ev=>{
             cy(5);const isCrit=ev.value<90;doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);doc.text(ev.time,mg+4,y);doc.setFont('helvetica','bold');doc.setTextColor(...(isCrit?RED:ORANGE));doc.text(ev.value+'%',mg+22,y);doc.setFont('helvetica','normal');doc.text(isCrit?'CRÍTICO':'Bajo',mg+38,y);doc.setTextColor(...BORDER);doc.setLineWidth(0.05);doc.line(mg+4,y+1.5,mg+70,y+1.5);y+=5;
