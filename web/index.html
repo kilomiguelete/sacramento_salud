@@ -270,6 +270,7 @@
           <div class="legend">
             <div class="legend-item"><span class="legend-line" style="background:var(--warn)"></span>94%</div>
             <div class="legend-item"><span class="legend-line" style="background:var(--bad)"></span>90%</div>
+            <div class="legend-item"><span style="display:inline-block;width:12px;height:12px;background:rgba(122,110,232,0.35);border-radius:2px"></span>Movimiento/pasos</div>
           </div>
         </div>
         <div class="dual-col">
@@ -465,6 +466,26 @@ const rlPlugin=(id,vals)=>({id,afterDraw(ch){
   const{ctx,chartArea:{left,right},scales:{y}}=ch;
   vals.forEach(([v,c])=>{const yp=y.getPixelForValue(v);ctx.save();ctx.strokeStyle=c;ctx.lineWidth=1;ctx.setLineDash([5,4]);ctx.globalAlpha=.8;ctx.beginPath();ctx.moveTo(left,yp);ctx.lineTo(right,yp);ctx.stroke();ctx.restore();});
 }});
+// Bandas verticales que marcan momentos con pasos (levantadas nocturnas)
+const stepBandsPlugin=(id,labels,steps)=>({id,beforeDraw(ch){
+  if(!steps||!steps.length)return;
+  const{ctx,chartArea:{top,bottom},scales:{x}}=ch;
+  const stepTimes=new Set(steps.map(s=>s.time));
+  ctx.save();
+  ctx.fillStyle='rgba(122,110,232,0.18)'; // morado translúcido
+  labels.forEach((lbl,idx)=>{
+    if(stepTimes.has(lbl)){
+      // Ancho de la banda: medio intervalo a cada lado
+      const xc=x.getPixelForValue(idx);
+      const xPrev=idx>0?x.getPixelForValue(idx-1):xc;
+      const xNext=idx<labels.length-1?x.getPixelForValue(idx+1):xc;
+      const left=(xc+xPrev)/2;
+      const right=(xc+xNext)/2;
+      ctx.fillRect(left,top,Math.max(right-left,3),bottom-top);
+    }
+  });
+  ctx.restore();
+}});
 function inSleepWindow(t,start,end){if(!start||!end)return true;if(start<=end)return t>=start&&t<=end;return t>=start||t<=end;}
 
 // ── Métricas clínicas ─────────────────────────────────────────────────────
@@ -554,13 +575,15 @@ async function loadSummaries(){
 // ── Detalle bajo demanda ──────────────────────────────────────────────────
 async function loadDayDetail(date,force=false){
   if(dayDetail[date]&&!force)return;
-  const[spo2Res,hrRes]=await Promise.all([
+  const[spo2Res,hrRes,stepsRes]=await Promise.all([
     db.from('spo2_readings').select('measured_at,value').eq('date',date).order('measured_at'),
     db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',date).order('measured_at'),
+    db.from('step_readings').select('measured_at,value').eq('date',date).order('measured_at'),
   ]);
   dayDetail[date]={
     spo2:(spo2Res.data||[]).map(r=>({time:r.measured_at.substring(11,16),value:parseFloat(r.value)})),
     hr:(hrRes.data||[]).map(r=>({time:r.measured_at.substring(11,16),min:r.min_hr?parseFloat(r.min_hr):null,max:r.max_hr?parseFloat(r.max_hr):null,avg:r.avg_hr?parseFloat(r.avg_hr):null})),
+    steps:(stepsRes.data||[]).map(r=>({time:r.measured_at.substring(11,16),value:parseFloat(r.value)})).filter(s=>s.value>0),
   };
 }
 
@@ -741,6 +764,7 @@ async function renderDay(){
   const sleepEnd=sleep?.sleep_end?.substring(11,16);
   document.getElementById('dualTitle').textContent=`SpO2 y FC — Noche del ${fmtDateShort(pd)}`;
   document.getElementById('dualSleepLabel').textContent=sleepStart&&sleepEnd?`Ventana de sueño: ${sleepStart} – ${sleepEnd}`:'';
+  // El conteo de levantadas se actualizará tras cargar el detalle
 
   // Score provisional (sin ODI/T90 todavía)
   const deepRemPct=sleep?.total_sleep>0?Math.round(((sleep.deep||0)+(sleep.rem||0))/sleep.total_sleep*100):null;
@@ -757,6 +781,14 @@ async function renderDay(){
 
   const spo2Sleep=spo2.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
   const hrSleep=hr.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
+  const stepsSleep=(dayDetail[selectedDate].steps||[]).filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
+
+  // Mostrar nº de momentos con movimiento nocturno (posibles levantadas)
+  if(sleepStart&&sleepEnd){
+    const movements=stepsSleep.length;
+    const totalNightSteps=stepsSleep.reduce((a,p)=>a+p.value,0);
+    document.getElementById('dualSleepLabel').textContent=`Ventana de sueño: ${sleepStart} – ${sleepEnd}`+(movements>0?` · ${movements} momento${movements!==1?'s':''} con movimiento (${Math.round(totalNightSteps)} pasos)`:' · sin movimiento detectado');
+  }
 
   // Calcular métricas clínicas
   const odi=computeODI(spo2Sleep,sleep?.total_sleep);
@@ -790,7 +822,7 @@ async function renderDay(){
     type:'line',
     data:{labels:spo2Sleep.map(p=>p.time),datasets:[{label:'SpO2',data:spo2Sleep.map(p=>p.value),borderColor:spo2Sleep.map(p=>sc(p.value)),borderWidth:2,pointBackgroundColor:spo2Sleep.map(p=>sc(p.value)),pointRadius:spo2Sleep.map(p=>p.value<90?5:p.value<94?4:3),tension:0.3,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>sc(ctx.p1.parsed.y)}}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`SpO2: ${ctx.parsed.y}%`}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},
-    plugins:[rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]
+    plugins:[stepBandsPlugin('sb1',spo2Sleep.map(p=>p.time),stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
   // FC chart
@@ -803,7 +835,8 @@ async function renderDay(){
         {label:'FC mín',data:hrSleep.map(p=>p.min),borderColor:'transparent',pointRadius:0,fill:false,tension:0.3},
         {label:'FC media',data:hrSleep.map(p=>p.avg),borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false},
       ]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>['FC máx','FC mín','FC media'][ctx.datasetIndex]+': '+Math.round(ctx.parsed.y)+' bpm'}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}}
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>['FC máx','FC mín','FC media'][ctx.datasetIndex]+': '+Math.round(ctx.parsed.y)+' bpm'}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},
+      plugins:[stepBandsPlugin('sb2',hrSleep.map(p=>p.time),stepsSleep)]
     });
   }else{
     const cv=document.getElementById('hrChart'),c2=cv.getContext('2d');
@@ -994,6 +1027,7 @@ async function refreshCharts(){
   const{spo2,hr}=dayDetail[selectedDate];
   const spo2Sleep=spo2.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
   const hrSleep=hr.filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
+  const stepsSleep=(dayDetail[selectedDate].steps||[]).filter(p=>inSleepWindow(p.time,sleepStart,sleepEnd));
 
   // Recalcular métricas
   const odi=computeODI(spo2Sleep,sleep?.total_sleep);
@@ -1014,9 +1048,9 @@ async function refreshCharts(){
   showScore(score,prevDate(selectedDate),odi,t90);
 
   document.getElementById('spo2Wrap').innerHTML='<canvas id="spo2Chart"></canvas>';
-  charts.spo2=new Chart(document.getElementById('spo2Chart'),{type:'line',data:{labels:spo2Sleep.map(p=>p.time),datasets:[{label:'SpO2',data:spo2Sleep.map(p=>p.value),borderColor:spo2Sleep.map(p=>sc(p.value)),borderWidth:2,pointBackgroundColor:spo2Sleep.map(p=>sc(p.value)),pointRadius:spo2Sleep.map(p=>p.value<90?5:p.value<94?4:3),tension:0.3,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>sc(ctx.p1.parsed.y)}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},plugins:[rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]});
+  charts.spo2=new Chart(document.getElementById('spo2Chart'),{type:'line',data:{labels:spo2Sleep.map(p=>p.time),datasets:[{label:'SpO2',data:spo2Sleep.map(p=>p.value),borderColor:spo2Sleep.map(p=>sc(p.value)),borderWidth:2,pointBackgroundColor:spo2Sleep.map(p=>sc(p.value)),pointRadius:spo2Sleep.map(p=>p.value<90?5:p.value<94?4:3),tension:0.3,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>sc(ctx.p1.parsed.y)}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb1',spo2Sleep.map(p=>p.time),stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]});
   document.getElementById('hrWrap').innerHTML='<canvas id="hrChart"></canvas>';
-  if(hrSleep.length){charts.hr=new Chart(document.getElementById('hrChart'),{type:'line',data:{labels:hrSleep.map(p=>p.time),datasets:[{label:'FC máx',data:hrSleep.map(p=>p.max),borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3},{label:'FC mín',data:hrSleep.map(p=>p.min),borderColor:'transparent',pointRadius:0,fill:false,tension:0.3},{label:'FC media',data:hrSleep.map(p=>p.avg),borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}}});}
+  if(hrSleep.length){charts.hr=new Chart(document.getElementById('hrChart'),{type:'line',data:{labels:hrSleep.map(p=>p.time),datasets:[{label:'FC máx',data:hrSleep.map(p=>p.max),borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3},{label:'FC mín',data:hrSleep.map(p=>p.min),borderColor:'transparent',pointRadius:0,fill:false,tension:0.3},{label:'FC media',data:hrSleep.map(p=>p.avg),borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb2',hrSleep.map(p=>p.time),stepsSleep)]});}
   const mb=document.getElementById('spo2ModalBtn');if(mb)mb.disabled=false;
 }
 
