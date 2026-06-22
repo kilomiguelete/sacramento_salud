@@ -113,6 +113,7 @@
   .modal-opt{background:transparent;border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;cursor:pointer;text-align:left;font-size:13px;transition:all .15s;}
   .modal-opt:hover{border-color:var(--muted);background:var(--bg);}
   .modal-opt.selected{border-color:var(--good);color:var(--good);}
+  .csv-gran.selected{border-color:#1A9E8F;color:#1A9E8F;background:#1A9E8F12;}
   .modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;}
   .btn-primary{background:var(--text);color:var(--bg);border:none;padding:8px 20px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:600;}
   .btn-primary:disabled{opacity:.5;cursor:default;}
@@ -362,12 +363,21 @@
     <h3>Exportar CSV personalizado</h3>
     <p style="margin-bottom:14px">Elige el período y los campos a incluir.</p>
 
-    <div style="flex-shrink:0;margin-bottom:16px">
+    <div style="flex-shrink:0;margin-bottom:14px">
+      <div style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Tipo de datos</div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="modal-opt csv-gran selected" data-gran="daily" onclick="setGranularity('daily')" style="flex:1;text-align:center">
+          <strong>Resumen diario</strong><span style="display:block;color:var(--muted);font-size:11px;margin-top:2px">1 fila por día</span>
+        </button>
+        <button class="modal-opt csv-gran" data-gran="detail" onclick="setGranularity('detail')" style="flex:1;text-align:center">
+          <strong>Detalle completo</strong><span style="display:block;color:var(--muted);font-size:11px;margin-top:2px">todas las lecturas</span>
+        </button>
+      </div>
       <div style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Período</div>
       <div class="modal-options" id="csvRangeOptions" style="margin-bottom:0"></div>
     </div>
 
-    <div style="flex:1;overflow-y:auto;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;padding:12px">
+    <div id="csvDailyFields" style="flex:1;overflow-y:auto;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;padding:12px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Campos a incluir</div>
         <div style="display:flex;gap:8px">
@@ -376,6 +386,21 @@
         </div>
       </div>
       <div id="csvFieldList"></div>
+    </div>
+
+    <div id="csvDetailInfo" class="hidden" style="margin-bottom:16px;border:1px solid var(--border);border-radius:8px;padding:14px;background:var(--bg)">
+      <div style="font-size:12px;color:var(--text);margin-bottom:8px;font-weight:600">Detalle completo incluye:</div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.6">
+        • Todas las lecturas de <strong style="color:var(--good)">SpO2</strong> con fecha y hora exacta<br>
+        • Todas las lecturas de <strong style="color:var(--pink)">FC</strong> (media, mín, máx) con timestamp<br>
+        • Cada fila = una medición individual del Apple Watch
+      </div>
+      <div style="font-size:11px;color:var(--warn);margin-top:10px" id="csvDetailWarn"></div>
+    </div>
+
+    <div id="csvProgress" class="hidden" style="margin-bottom:16px">
+      <div class="progress-bar"><div class="progress-fill" id="csvProgressFill" style="width:0%"></div></div>
+      <p style="color:var(--muted);font-size:12px;text-align:center" id="csvProgressText">Descargando…</p>
     </div>
 
     <div class="modal-footer" style="flex-shrink:0">
@@ -1046,8 +1071,8 @@ function downloadMonthCSV(){
 
 // ── Exportador CSV personalizado ──────────────────────────────────────────
 let csvSelectedRange=null;
+let csvGranularity='daily';
 
-// Definición de todos los campos disponibles
 const CSV_FIELDS=[
   {key:'date_bd',    label:'Fecha BD (amanecer)',     get:d=>d},
   {key:'date_night', label:'Noche del (DIA-1)',        get:d=>prevDate(d)},
@@ -1072,10 +1097,28 @@ const CSV_FIELDS=[
   {key:'temp',       label:'Temp. muñeca (°C)',        get:d=>summaries[d]?.vitals?.wrist_temperature?.toFixed(1)??''},
 ];
 
+function setGranularity(g){
+  csvGranularity=g;
+  document.querySelectorAll('.csv-gran').forEach(b=>b.classList.toggle('selected',b.dataset.gran===g));
+  document.getElementById('csvDailyFields').classList.toggle('hidden',g!=='daily');
+  document.getElementById('csvDetailInfo').classList.toggle('hidden',g!=='detail');
+  updateCsvDetailWarn();
+  updateCsvBtn();
+}
+
+function updateCsvDetailWarn(){
+  if(csvGranularity!=='detail'||!csvSelectedRange){document.getElementById('csvDetailWarn').textContent='';return;}
+  const n=csvSelectedRange.length;
+  // ~220 lecturas FC + 20 SpO2 por día aprox
+  const estRows=n*240;
+  document.getElementById('csvDetailWarn').textContent=`≈ ${n} días · ~${estRows.toLocaleString('es-ES')} filas. Descargará día a día, puede tardar ${n>60?'1-2 minutos':'unos segundos'}.`;
+}
+
 function openCsvModal(){
   csvSelectedRange=null;
+  csvGranularity='daily';
+  setGranularity('daily');
 
-  // Opciones de período
   const ro=document.getElementById('csvRangeOptions');ro.innerHTML='';
   const ranges=[
     {label:'Este mes',days:()=>monthsMap[selectedMonth]||[]},
@@ -1083,15 +1126,14 @@ function openCsvModal(){
     {label:'Últimos 3 meses',days:()=>{const c=new Date();c.setMonth(c.getMonth()-3);return allDays.filter(d=>d>=c.toISOString().substring(0,10));}},
     {label:`Todo el historial (${allDays.length} días)`,days:()=>allDays},
   ];
-  ranges.forEach((r,i)=>{
+  ranges.forEach(r=>{
     const days=r.days();
     const btn=document.createElement('button');btn.className='modal-opt';
     btn.innerHTML=`<strong>${r.label}</strong> <span style="color:var(--muted);font-size:12px">· ${days.length} días</span>`;
-    btn.onclick=()=>{document.querySelectorAll('#csvRangeOptions .modal-opt').forEach(b=>b.classList.remove('selected'));btn.classList.add('selected');csvSelectedRange=days;updateCsvBtn();};
+    btn.onclick=()=>{document.querySelectorAll('#csvRangeOptions .modal-opt').forEach(b=>b.classList.remove('selected'));btn.classList.add('selected');csvSelectedRange=days;updateCsvDetailWarn();updateCsvBtn();};
     ro.appendChild(btn);
   });
 
-  // Lista de campos (checkboxes), todos marcados por defecto
   const fl=document.getElementById('csvFieldList');fl.innerHTML='';
   CSV_FIELDS.forEach(f=>{
     const lbl=document.createElement('label');
@@ -1100,30 +1142,79 @@ function openCsvModal(){
     fl.appendChild(lbl);
   });
 
+  document.getElementById('csvProgress').classList.add('hidden');
   updateCsvBtn();
   document.getElementById('csvModal').classList.remove('hidden');
 }
 function closeCsvModal(){document.getElementById('csvModal').classList.add('hidden');}
 function toggleAllCsvFields(on){document.querySelectorAll('.csv-field-cb').forEach(cb=>cb.checked=on);updateCsvBtn();}
 function updateCsvBtn(){
-  const anyField=document.querySelectorAll('.csv-field-cb:checked').length>0;
-  document.getElementById('csvGenBtn').disabled=!(csvSelectedRange&&csvSelectedRange.length&&anyField);
+  let ok=csvSelectedRange&&csvSelectedRange.length;
+  if(csvGranularity==='daily')ok=ok&&document.querySelectorAll('.csv-field-cb:checked').length>0;
+  document.getElementById('csvGenBtn').disabled=!ok;
 }
 
-function generateCustomCSV(){
+function setCsvProgress(pct,text){
+  document.getElementById('csvProgressFill').style.width=pct+'%';
+  document.getElementById('csvProgressText').textContent=text;
+}
+
+async function generateCustomCSV(){
   if(!csvSelectedRange?.length)return;
-  const selectedKeys=[...document.querySelectorAll('.csv-field-cb:checked')].map(cb=>cb.value);
-  if(!selectedKeys.length)return;
-  const fields=CSV_FIELDS.filter(f=>selectedKeys.includes(f.key));
 
-  const rows=[fields.map(f=>f.label)];
-  csvSelectedRange.forEach(d=>{
-    if(!summaries[d])return;
-    rows.push(fields.map(f=>f.get(d)));
-  });
+  if(csvGranularity==='daily'){
+    // Resumen diario (igual que antes)
+    const selectedKeys=[...document.querySelectorAll('.csv-field-cb:checked')].map(cb=>cb.value);
+    if(!selectedKeys.length)return;
+    const fields=CSV_FIELDS.filter(f=>selectedKeys.includes(f.key));
+    const rows=[fields.map(f=>f.label)];
+    csvSelectedRange.forEach(d=>{if(summaries[d])rows.push(fields.map(f=>f.get(d)));});
+    downloadCSVFile(rows,`sacramento-resumen-${new Date().toISOString().substring(0,10)}.csv`);
+    closeCsvModal();
+    return;
+  }
 
-  downloadCSVFile(rows,`sacramento-salud-custom-${new Date().toISOString().substring(0,10)}.csv`);
+  // ── Detalle completo: descargar todas las lecturas día a día ────────────
+  document.getElementById('csvGenBtn').disabled=true;
+  document.getElementById('csvProgress').classList.remove('hidden');
+  setCsvProgress(0,'Iniciando descarga…');
+
+  const days=csvSelectedRange;
+  // Cabecera unificada: tipo, fecha BD, noche del, hora, y los valores
+  const rows=[['Tipo','Fecha BD','Noche del','Fecha-hora','Valor SpO2 (%)','FC media (bpm)','FC mín (bpm)','FC máx (bpm)']];
+
+  for(let i=0;i<days.length;i++){
+    const d=days[i];
+    setCsvProgress(Math.round(i/days.length*100),`Descargando ${i+1}/${days.length} · ${fmtDateShort(prevDate(d))}…`);
+
+    // Descargar SpO2 y FC de ese día directamente (no usamos caché para no saturar memoria)
+    const[spo2Res,hrRes]=await Promise.all([
+      db.from('spo2_readings').select('measured_at,value').eq('date',d).order('measured_at'),
+      db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',d).order('measured_at'),
+    ]);
+
+    const pd=prevDate(d);
+    (spo2Res.data||[]).forEach(r=>{
+      rows.push(['SpO2',d,pd,r.measured_at,r.value,'','','']);
+    });
+    (hrRes.data||[]).forEach(r=>{
+      rows.push(['FC',d,pd,r.measured_at,'',r.avg_hr!=null?Math.round(r.avg_hr):'',r.min_hr!=null?Math.round(r.min_hr):'',r.max_hr!=null?Math.round(r.max_hr):'']);
+    });
+
+    // Pequeña pausa cada 10 días para no bloquear la UI
+    if(i%10===0)await new Promise(r=>setTimeout(r,0));
+  }
+
+  setCsvProgress(100,`Generando archivo (${(rows.length-1).toLocaleString('es-ES')} filas)…`);
+  await new Promise(r=>setTimeout(r,100));
+
+  // Ordenar por fecha-hora (excepto cabecera)
+  const header=rows[0];
+  const body=rows.slice(1).sort((a,b)=>String(a[3]).localeCompare(String(b[3])));
+  downloadCSVFile([header,...body],`sacramento-detalle-${new Date().toISOString().substring(0,10)}.csv`);
+
   closeCsvModal();
+  document.getElementById('csvGenBtn').disabled=false;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
