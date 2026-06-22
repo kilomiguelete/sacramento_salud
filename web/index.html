@@ -286,6 +286,26 @@
       </div>
     </div>
 
+    <!-- FC 24h con detección de picos -->
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+        <div>
+          <div class="panel-title" id="hr24Title" style="margin-bottom:3px">Frecuencia cardíaca — 24 horas</div>
+          <div style="font-size:11px;color:var(--muted)" id="hr24Sub">Picos atípicos marcados en rojo</div>
+        </div>
+        <button class="dual-btn" onclick="refreshHR24()">↺ Recargar</button>
+      </div>
+      <div class="legend" style="margin-top:0;margin-bottom:10px">
+        <div class="legend-item"><span class="legend-line" style="background:#C25880"></span>FC media</div>
+        <div class="legend-item"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#D94040"></span>Pico atípico (&gt;media+2σ y &gt;100 bpm)</div>
+        <div class="legend-item"><span class="legend-line" style="background:#6B8BAD;border-top:1px dashed #6B8BAD;height:0"></span>Media del día</div>
+      </div>
+      <div style="height:200px;position:relative" id="hr24Wrap">
+        <div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>
+      </div>
+      <div id="hr24Peaks" style="margin-top:12px"></div>
+    </div>
+
     <!-- Fases + caídas -->
     <div class="panel-row">
       <div class="panel">
@@ -762,6 +782,9 @@ async function renderDay(){
   });
 
   document.getElementById('footer').textContent=`Noche del ${fmtDateLong(pd)} · Apple Watch de Sacramento`;
+
+  // Renderizar FC 24h (usa el mismo dayDetail ya cargado)
+  renderHR24();
 }
 
 function showScore(score,pd,odi,t90){
@@ -778,6 +801,112 @@ function showScore(score,pd,odi,t90){
   const effEl=document.getElementById('valEfficiency');
   const effTxt=effEl.textContent&&effEl.textContent!=='–'?`Efic. sueño: ${effEl.textContent}`:'';
   document.getElementById('scoreComponents').textContent=[odiTxt,t90Txt,effTxt].filter(Boolean).join(' · ')||'Calculando…';
+}
+
+// ── FC 24 horas con detección de picos atípicos ──────────────────────────
+function detectHRPeaks(hrData){
+  // hrData: [{time, avg, max, min}]
+  const avgs=hrData.map(p=>p.avg).filter(v=>v!=null);
+  if(avgs.length<5)return{mean:null,std:null,peaks:[]};
+  const mean=avgs.reduce((a,b)=>a+b,0)/avgs.length;
+  const variance=avgs.reduce((a,b)=>a+Math.pow(b-mean,2),0)/avgs.length;
+  const std=Math.sqrt(variance);
+  const statThreshold=mean+2*std;
+  const FIXED=100; // umbral fijo bpm
+  // Un pico es atípico si supera AMBOS: media+2σ Y el umbral fijo
+  const threshold=Math.max(statThreshold,FIXED);
+  const peaks=[];
+  hrData.forEach(p=>{
+    // usar el máximo del intervalo para detectar el pico real
+    const val=p.max!=null?p.max:p.avg;
+    if(val!=null&&p.avg!=null&&p.avg>statThreshold&&val>FIXED){
+      peaks.push({time:p.time,value:val,avg:p.avg});
+    }
+  });
+  return{mean:Math.round(mean),std:Math.round(std),statThreshold:Math.round(statThreshold),peaks};
+}
+
+async function renderHR24(){
+  if(!selectedDate)return;
+  const pd=prevDate(selectedDate);
+  document.getElementById('hr24Title').textContent=`Frecuencia cardíaca 24h — ${fmtDateShort(selectedDate)}`;
+  document.getElementById('hr24Wrap').innerHTML='<div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>';
+  dc('hr24');
+
+  await loadDayDetail(selectedDate);
+  const{hr}=dayDetail[selectedDate];
+
+  if(!hr||!hr.length){
+    document.getElementById('hr24Wrap').innerHTML='<div class="chart-loading">Sin datos de FC para este día</div>';
+    document.getElementById('hr24Peaks').innerHTML='';
+    return;
+  }
+
+  // Ordenar por hora
+  const hrSorted=[...hr].sort((a,b)=>a.time.localeCompare(b.time));
+  const{mean,std,statThreshold,peaks}=detectHRPeaks(hrSorted);
+
+  document.getElementById('hr24Sub').textContent=`Media del día: ${mean} bpm · ${peaks.length} pico${peaks.length!==1?'s':''} atípico${peaks.length!==1?'s':''} detectado${peaks.length!==1?'s':''}`;
+
+  document.getElementById('hr24Wrap').innerHTML='<canvas id="hr24Chart"></canvas>';
+  const peakTimes=new Set(peaks.map(p=>p.time));
+
+  charts.hr24=new Chart(document.getElementById('hr24Chart'),{
+    type:'line',
+    data:{
+      labels:hrSorted.map(p=>p.time),
+      datasets:[
+        {label:'FC máx',data:hrSorted.map(p=>p.max),borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.10)',tension:0.2},
+        {label:'FC mín',data:hrSorted.map(p=>p.min),borderColor:'transparent',pointRadius:0,fill:false,tension:0.2},
+        {label:'FC media',data:hrSorted.map(p=>p.avg),borderColor:'#C25880',borderWidth:1.5,
+          pointBackgroundColor:hrSorted.map(p=>peakTimes.has(p.time)?'#D94040':'#C25880'),
+          pointBorderColor:hrSorted.map(p=>peakTimes.has(p.time)?'#fff':'transparent'),
+          pointBorderWidth:hrSorted.map(p=>peakTimes.has(p.time)?1.5:0),
+          pointRadius:hrSorted.map(p=>peakTimes.has(p.time)?5:1.5),
+          tension:0.2,fill:false},
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{
+        const isPeak=peakTimes.has(hrSorted[ctx.dataIndex]?.time);
+        const n=['FC máx','FC mín','FC media'][ctx.datasetIndex];
+        return `${n}: ${Math.round(ctx.parsed.y)} bpm${isPeak&&ctx.datasetIndex===2?'  ⚠ PICO':''}`;
+      }}}},
+      scales:{
+        x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:12},grid:{color:'#1E3048'}},
+        y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}},
+      }
+    },
+    plugins:[{id:'hrMeanLine',afterDraw(ch){
+      const{ctx,chartArea:{left,right},scales:{y}}=ch;
+      [[mean,'#6B8BAD','media'],[statThreshold,'#D94040','umbral']].forEach(([val,col])=>{
+        const yp=y.getPixelForValue(val);
+        ctx.save();ctx.strokeStyle=col;ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.globalAlpha=.6;
+        ctx.beginPath();ctx.moveTo(left,yp);ctx.lineTo(right,yp);ctx.stroke();ctx.restore();
+      });
+    }}]
+  });
+
+  // Lista de picos
+  const peaksEl=document.getElementById('hr24Peaks');
+  if(peaks.length){
+    const sorted=[...peaks].sort((a,b)=>b.value-a.value);
+    peaksEl.innerHTML=`
+      <div style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Picos atípicos detectados (${peaks.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${sorted.slice(0,12).map(p=>`<div style="background:rgba(217,64,64,.12);border:1px solid rgba(217,64,64,.3);border-radius:8px;padding:5px 10px;font-size:12px"><span style="color:var(--muted)">${p.time}</span> <span style="color:#D94040;font-weight:600">${Math.round(p.value)} bpm</span></div>`).join('')}
+        ${peaks.length>12?`<div style="padding:5px 10px;font-size:12px;color:var(--muted)">+${peaks.length-12} más</div>`:''}
+      </div>`;
+  }else{
+    peaksEl.innerHTML='<div style="font-size:12px;color:var(--good)">✓ Sin picos atípicos de FC este día</div>';
+  }
+}
+
+async function refreshHR24(){
+  if(!selectedDate)return;
+  delete dayDetail[selectedDate];
+  await renderHR24();
 }
 
 // ── Refresca solo las gráficas SpO2 y FC ──────────────────────────────────
