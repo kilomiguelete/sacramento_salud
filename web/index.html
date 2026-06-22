@@ -253,6 +253,7 @@
         </div>
         <div class="dual-header-btns">
           <button class="dual-btn" id="spo2ModalBtn" onclick="showSpo2Modal()">📋 Ver lecturas</button>
+          <button class="dual-btn" onclick="downloadSleepCSV()">↓ CSV</button>
           <button class="dual-btn" onclick="refreshCharts()">↺ Recargar</button>
         </div>
       </div>
@@ -293,7 +294,7 @@
           <div class="panel-title" id="hr24Title" style="margin-bottom:3px">Frecuencia cardíaca — 24 horas</div>
           <div style="font-size:11px;color:var(--muted)" id="hr24Sub">Picos atípicos marcados en rojo</div>
         </div>
-        <button class="dual-btn" onclick="refreshHR24()">↺ Recargar</button>
+        <div style="display:flex;gap:6px"><button class="dual-btn" onclick="downloadHR24CSV()">↓ CSV</button><button class="dual-btn" onclick="refreshHR24()">↺ Recargar</button></div>
       </div>
       <div class="legend" style="margin-top:0;margin-bottom:10px">
         <div class="legend-item"><span class="legend-line" style="background:#C25880"></span>FC media</div>
@@ -314,14 +315,20 @@
         <div class="sleep-legend" id="sleepLegend"></div>
       </div>
       <div class="panel">
-        <div class="panel-title" id="eventsChartTitle">Caídas SpO2 &lt; 94% — últimos 30 días</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div class="panel-title" id="eventsChartTitle" style="margin-bottom:0">Caídas SpO2 &lt; 94% — últimos 30 días</div>
+          <button class="dual-btn" onclick="downloadEventsCSV()" style="padding:3px 10px">↓ CSV</button>
+        </div>
         <div style="height:120px;position:relative"><canvas id="eventsChart"></canvas></div>
       </div>
     </div>
 
     <!-- SpO2 mensual -->
     <div class="panel">
-      <div class="panel-title" id="monthChartTitle">SpO2 mínimo — mes</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="panel-title" id="monthChartTitle" style="margin-bottom:0">SpO2 mínimo — mes</div>
+        <button class="dual-btn" onclick="downloadMonthCSV()" style="padding:3px 10px">↓ CSV</button>
+      </div>
       <div style="height:110px;position:relative"><canvas id="spo2MonthChart"></canvas></div>
     </div>
 
@@ -947,6 +954,65 @@ async function refreshCharts(){
   document.getElementById('hrWrap').innerHTML='<canvas id="hrChart"></canvas>';
   if(hrSleep.length){charts.hr=new Chart(document.getElementById('hrChart'),{type:'line',data:{labels:hrSleep.map(p=>p.time),datasets:[{label:'FC máx',data:hrSleep.map(p=>p.max),borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3},{label:'FC mín',data:hrSleep.map(p=>p.min),borderColor:'transparent',pointRadius:0,fill:false,tension:0.3},{label:'FC media',data:hrSleep.map(p=>p.avg),borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}}});}
   const mb=document.getElementById('spo2ModalBtn');if(mb)mb.disabled=false;
+}
+
+// ── Descargas CSV por gráfica ─────────────────────────────────────────────
+function downloadCSVFile(rows, filename){
+  const csv=rows.map(r=>r.map(v=>{
+    const s=String(v??'');
+    return s.includes(',')||s.includes('"')?`"${s.replace(/"/g,'""')}"`:s;
+  }).join(',')).join('\n');
+  const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=filename;a.click();
+  URL.revokeObjectURL(url);
+}
+
+// SpO2 + FC del sueño (lecturas puntuales de la noche seleccionada)
+function downloadSleepCSV(){
+  if(!selectedDate||!dayDetail[selectedDate])return;
+  const s=summaries[selectedDate],sleep=s?.sleep;
+  const ss=sleep?.sleep_start?.substring(11,16),se=sleep?.sleep_end?.substring(11,16);
+  const{spo2,hr}=dayDetail[selectedDate];
+  const spo2Sleep=spo2.filter(p=>inSleepWindow(p.time,ss,se));
+  const hrSleep=hr.filter(p=>inSleepWindow(p.time,ss,se));
+  // Combinar por hora
+  const byTime={};
+  spo2Sleep.forEach(p=>{byTime[p.time]=byTime[p.time]||{};byTime[p.time].spo2=p.value;});
+  hrSleep.forEach(p=>{byTime[p.time]=byTime[p.time]||{};byTime[p.time].hrAvg=p.avg;byTime[p.time].hrMin=p.min;byTime[p.time].hrMax=p.max;});
+  const times=Object.keys(byTime).sort();
+  const rows=[['Hora','SpO2 (%)','FC media (bpm)','FC mín (bpm)','FC máx (bpm)']];
+  times.forEach(t=>{const r=byTime[t];rows.push([t,r.spo2??'',r.hrAvg!=null?Math.round(r.hrAvg):'',r.hrMin!=null?Math.round(r.hrMin):'',r.hrMax!=null?Math.round(r.hrMax):'']);});
+  downloadCSVFile(rows,`spo2-fc-sueno-${prevDate(selectedDate)}.csv`);
+}
+
+// FC 24 horas (todas las lecturas del día con marca de pico)
+function downloadHR24CSV(){
+  if(!selectedDate||!dayDetail[selectedDate])return;
+  const{hr}=dayDetail[selectedDate];
+  if(!hr||!hr.length)return;
+  const hrSorted=[...hr].sort((a,b)=>a.time.localeCompare(b.time));
+  const{peaks}=detectHRPeaks(hrSorted);
+  const peakTimes=new Set(peaks.map(p=>p.time));
+  const rows=[['Hora','FC media (bpm)','FC mín (bpm)','FC máx (bpm)','Pico atípico']];
+  hrSorted.forEach(p=>rows.push([p.time,p.avg!=null?Math.round(p.avg):'',p.min!=null?Math.round(p.min):'',p.max!=null?Math.round(p.max):'',peakTimes.has(p.time)?'SÍ':'']));
+  downloadCSVFile(rows,`fc-24h-${prevDate(selectedDate)}.csv`);
+}
+
+// Caídas por noche (últimos 30 días)
+function downloadEventsCSV(){
+  const rd=allDays.slice(-30);
+  const rows=[['Noche del','Caídas <94%','Caídas <90%','SpO2 mín (%)']];
+  rd.forEach(d=>{const s=summaries[d];rows.push([prevDate(d),s?.ev94??'',s?.ev90??'',s?.spo2_min??'']);});
+  downloadCSVFile(rows,`caidas-spo2-30dias.csv`);
+}
+
+// SpO2 mínimo del mes
+function downloadMonthCSV(){
+  const mDays=monthsMap[selectedMonth]||[];
+  const rows=[['Noche del','SpO2 mín (%)','SpO2 prom (%)','Caídas <94%','Caídas <90%']];
+  mDays.forEach(d=>{const s=summaries[d];rows.push([prevDate(d),s?.spo2_min??'',s?.spo2_avg??'',s?.ev94??'',s?.ev90??'']);});
+  downloadCSVFile(rows,`spo2-mensual-${selectedMonth}.csv`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════
