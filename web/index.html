@@ -1163,7 +1163,9 @@ async function renderHR24(){
   const hrSorted=[...hr].sort((a,b)=>a.time.localeCompare(b.time));
   const{mean,std,statThreshold,peaks}=detectHRPeaks(hrSorted);
 
-  document.getElementById('hr24Sub').textContent=`Media del día: ${mean} bpm · ${peaks.length} pico${peaks.length!==1?'s':''} atípico${peaks.length!==1?'s':''} detectado${peaks.length!==1?'s':''}`;
+  const primeraHora=hrSorted.length?hrSorted[0].time:'–';
+  const ultimaHora=hrSorted.length?hrSorted[hrSorted.length-1].time:'–';
+  document.getElementById('hr24Sub').textContent=`Datos de ${primeraHora} a ${ultimaHora} · Media: ${mean} bpm · ${peaks.length} pico${peaks.length!==1?'s':''} atípico${peaks.length!==1?'s':''}`;
 
   document.getElementById('hr24Wrap').innerHTML='<canvas id="hr24Chart"></canvas>';
   const peakTimes=new Set(peaks.map(p=>p.time));
@@ -1255,11 +1257,22 @@ function renderCombinedChart(){
   const hrSleep=filterNight(hr,ss,se);
   const stepsSleep=filterNight(steps||[],ss,se);
 
-  // Unificar eje de tiempo: todas las horas presentes en cualquier serie
-  const allTimes=[...new Set([...spo2Sleep.map(p=>p.time),...hrSleep.map(p=>p.time),...stepsSleep.map(p=>p.time)])].sort();
+  // Unificar eje de tiempo conservando orden cruzando medianoche
+  const merged=[...spo2Sleep.map(p=>({...p,_t:'spo2'})),...hrSleep.map(p=>({...p,_t:'hr'})),...stepsSleep.map(p=>({...p,_t:'st'}))];
+  const allTimes=[...new Set(filterNight(merged,ss,se).map(p=>p.time))];
   const spo2Map={};spo2Sleep.forEach(p=>spo2Map[p.time]=p.value);
   const hrMap={};hrSleep.forEach(p=>hrMap[p.time]=p.avg);
   const stepsMap={};stepsSleep.forEach(p=>stepsMap[p.time]=p.value);
+
+  // Rango de FC dinámico pero con margen, para que no quede aplastada abajo
+  const hrVals=hrSleep.map(p=>p.avg).filter(v=>v!=null);
+  const hrMin=hrVals.length?Math.min(...hrVals):50;
+  const hrMax=hrVals.length?Math.max(...hrVals):70;
+  const hrPad=Math.max(8,(hrMax-hrMin)*0.4);
+  // El eje de FC ocupa solo la MITAD SUPERIOR del gráfico, el SpO2 la zona principal
+  // Para separarlos visualmente: FC arriba (rango estrecho centrado alto), SpO2 abajo.
+  const hrAxisMin=Math.floor(hrMin-hrPad);
+  const hrAxisMax=Math.ceil(hrMax+hrPad*3); // más margen arriba para empujar la FC hacia el centro
 
   dc('combined');
   document.getElementById('combinedWrap').innerHTML='<canvas id="combinedChart"></canvas>';
@@ -1267,21 +1280,21 @@ function renderCombinedChart(){
     data:{
       labels:allTimes,
       datasets:[
-        // Pasos como barras (eje derecho oculto)
+        // Pasos como barras (eje propio oculto, abajo)
         {type:'bar',label:'Pasos',data:allTimes.map(t=>stepsMap[t]??null),
-         backgroundColor:'rgba(230,150,30,0.55)',borderColor:'#E69620',borderWidth:1,
-         yAxisID:'ySteps',order:3,barThickness:'flex',maxBarThickness:14},
+         backgroundColor:'rgba(230,150,30,0.65)',borderColor:'#E69620',borderWidth:0,
+         yAxisID:'ySteps',order:5,barThickness:'flex',maxBarThickness:10},
         // SpO2 línea (eje izquierdo)
         {type:'line',label:'SpO2',data:allTimes.map(t=>spo2Map[t]??null),
-         borderColor:'#1D9E75',borderWidth:2,
+         borderColor:'#1D9E75',borderWidth:2.5,
          pointBackgroundColor:allTimes.map(t=>sc(spo2Map[t])),
-         pointRadius:allTimes.map(t=>{const v=spo2Map[t];return v==null?0:v<90?5:v<94?4:3;}),
+         pointRadius:allTimes.map(t=>{const v=spo2Map[t];return v==null?0:v<90?5:v<94?4:2.5;}),
          tension:0.3,spanGaps:true,yAxisID:'ySpo2',order:1,
          segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}},
         // FC línea (eje derecho)
         {type:'line',label:'FC',data:allTimes.map(t=>hrMap[t]!=null?Math.round(hrMap[t]):null),
-         borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,
-         tension:0.3,spanGaps:true,yAxisID:'yHr',order:2},
+         borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:1.5,
+         tension:0.3,spanGaps:true,yAxisID:'yHr',order:2,borderDash:[]},
       ]
     },
     options:{
@@ -1299,9 +1312,12 @@ function renderCombinedChart(){
       },
       scales:{
         x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:8},grid:{color:'#1E3048'}},
-        ySpo2:{position:'left',min:78,max:100,ticks:{color:'#1D9E75',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'},title:{display:true,text:'SpO2',color:'#1D9E75',font:{size:9}}},
-        yHr:{position:'right',ticks:{color:'#C25880',font:{size:9},callback:v=>v+' bpm'},grid:{display:false},title:{display:true,text:'FC',color:'#C25880',font:{size:9}}},
-        ySteps:{position:'right',display:false,min:0,max:Math.max(40,...stepsSleep.map(p=>p.value))*3},
+        // SpO2: ocupa todo el rango vertical real (78-100)
+        ySpo2:{position:'left',min:78,max:100,ticks:{color:'#1D9E75',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'},title:{display:true,text:'SpO2 (%)',color:'#1D9E75',font:{size:10,weight:'bold'}}},
+        // FC: rango propio con margen para que no quede pegada al fondo
+        yHr:{position:'right',min:hrAxisMin,max:hrAxisMax,ticks:{color:'#C25880',font:{size:9},callback:v=>v+''},grid:{display:false},title:{display:true,text:'FC (bpm)',color:'#C25880',font:{size:10,weight:'bold'}}},
+        // Pasos: ocupan solo el 20% inferior del gráfico
+        ySteps:{position:'right',display:false,min:0,max:Math.max(40,...stepsSleep.map(p=>p.value))*5},
       }
     },
     plugins:[rlPlugin('rlc',[[94,'#C98B0A'],[90,'#D94040']])]
