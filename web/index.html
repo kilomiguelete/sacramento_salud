@@ -10,9 +10,10 @@
 <style>
   :root{--bg:#0B1220;--surface:#121E30;--border:#1E3048;--text:#E0EAF8;--muted:#6B8BAD;--good:#1D9E75;--warn:#C98B0A;--bad:#D94040;--purple:#7A6EE8;--pink:#C25880;--teal:#1A9E8F;--radius:12px;}
   *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{max-width:100%;overflow-x:hidden;}
   body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh;}
-  .app{max-width:960px;margin:0 auto;padding:20px 16px 48px;}
-  .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;}
+  .app{max-width:960px;margin:0 auto;padding:20px 16px 48px;width:100%;}
+  .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:10px;flex-wrap:wrap;}
   .header h1{font-size:20px;font-weight:600;letter-spacing:-.02em;}
   .header-sub{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px;}
   .header-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
@@ -22,7 +23,7 @@
   .btn-pdf{border-color:#C98B0A55;color:#C98B0A;}.btn-pdf:hover{border-color:#C98B0A;background:#C98B0A15;}
   .btn-today{border-color:var(--good);color:var(--good);padding:6px 12px;}.btn-today:hover{background:#1D9E7520;}
   /* Nav */
-  .nav-container{background:var(--surface);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;}
+  .nav-container{background:var(--surface);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;max-width:100%;overflow:hidden;}
   .month-row{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
   .month-scroller{display:flex;gap:6px;overflow-x:auto;flex:1;scrollbar-width:none;padding-bottom:2px;}
   .month-scroller::-webkit-scrollbar{display:none;}
@@ -44,7 +45,7 @@
   .day-dot{width:6px;height:6px;border-radius:50%;}
   .hint{font-size:10px;color:var(--muted);text-align:center;margin-top:6px;opacity:.6;}
   /* Score banner */
-  .score-banner{border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);}
+  .score-banner{border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);gap:12px;flex-wrap:wrap;}
   .score-night{font-size:12px;color:var(--muted);}
   .score-night strong{color:var(--text);font-size:14px;}
   .score-badge{display:flex;align-items:center;gap:12px;}
@@ -58,32 +59,35 @@
   .hidden{display:none!important;}
   /* Cards */
   .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;}
-  @media(max-width:640px){.cards{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:380px){.cards{grid-template-columns:1fr;}}
   .card{background:var(--surface);border-radius:var(--radius);padding:13px 15px;border-left:3px solid var(--border);}
   .card-label{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-bottom:5px;}
-  .card-value{font-size:24px;font-weight:700;line-height:1;letter-spacing:-.03em;}
+  .card-value{font-size:24px;font-weight:700;line-height:1;letter-spacing:-.03em;word-break:break-word;}
   .card-sub{font-size:11px;color:var(--muted);margin-top:4px;}
   .card-note{font-size:9px;color:var(--muted);margin-top:3px;opacity:.7;}
   /* Dual panel */
-  .dual-panel{background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
-  .dual-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;}
+  .dual-panel{background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:14px;max-width:100%;overflow:hidden;}
+  .dual-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:10px;flex-wrap:wrap;}
   .dual-header-left{}
   .dual-panel-title{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:3px;}
   .dual-sleep-label{font-size:11px;color:var(--muted);}
-  .dual-header-btns{display:flex;gap:6px;flex-shrink:0;}
+  .dual-header-btns{display:flex;gap:6px;flex-wrap:wrap;}
   .dual-btn{background:transparent;border:1px solid var(--border);color:var(--muted);padding:5px 12px;border-radius:20px;cursor:pointer;font-size:11px;white-space:nowrap;transition:all .15s;}
   .dual-btn:hover{border-color:var(--muted);color:var(--text);}
   .dual-charts{display:grid;grid-template-columns:1fr 1fr;gap:0;}
-  @media(max-width:640px){.dual-charts{grid-template-columns:1fr;}}
+  @media(max-width:760px){.dual-charts{grid-template-columns:1fr;}
+    .dual-col:first-child{border-right:none;border-bottom:1px solid var(--border);padding:0 0 16px 0;margin-bottom:16px;}
+    .dual-col{padding:0;}}
   .dual-col{padding:0 12px;}
   .dual-col:first-child{padding-left:0;border-right:1px solid var(--border);}
   .dual-col:last-child{padding-right:0;}
   .dual-col-title{font-size:10px;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px;}
   /* Panels */
-  .panel{background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
+  .panel{background:var(--surface);border-radius:var(--radius);padding:16px;margin-bottom:14px;max-width:100%;overflow:hidden;}
   .panel-title{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
   .panel-row{display:grid;grid-template-columns:1fr 1.5fr;gap:14px;margin-bottom:14px;}
-  @media(max-width:640px){.panel-row{grid-template-columns:1fr;}}
+  @media(max-width:760px){.panel-row{grid-template-columns:1fr;}}
   .legend{display:flex;gap:14px;margin-top:8px;flex-wrap:wrap;}
   .legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);}
   .legend-line{display:inline-block;width:18px;height:2px;}
@@ -604,59 +608,47 @@ async function loadSummaries(){
   }
   allDays=[...dates].sort();
 
-  // Añadir un "día virtual" = día siguiente al último con datos.
-  // Su prevDate es el último día natural (ej. 22), que SÍ tiene FC aunque su
-  // madrugada (del día 23) todavía no exista. Permite ver el día más reciente.
-  if(allDays.length){
-    const ultimo=allDays[allDays.length-1];
-    const siguiente=nextDate(ultimo);
-    if(!dates.has(siguiente)){
-      allDays.push(siguiente);
-      // Marcar como resumen "parcial": sin datos de noche todavía, pero existe
-      summaries[siguiente]={sleep:null,vitals:null,spo2_min:null,spo2_avg:null,ev94:0,ev90:0,parcial:true};
-    }
-  }
-
   monthsMap={};
   for(const d of allDays){const m=d.substring(0,7);if(!monthsMap[m])monthsMap[m]=[];monthsMap[m].push(d);}
   allMonths=Object.keys(monthsMap).sort();
 }
 
 // ── Detalle bajo demanda ──────────────────────────────────────────────────
+// MODELO CLARO: date = día natural X que muestra el calendario.
+//   · NOCHE  = tarde-noche del día X-1 (acostarse→24:00) + madrugada del día X (00:00→despertar)
+//             = la noche del (X-1)→X.
+//   · FC 24h = todo el día natural X completo (00:00→23:59).
 async function loadDayDetail(date,force=false){
   if(dayDetail[date]&&!force)return;
-  // date = fila de BD (día del amanecer, X+1). El calendario muestra prevDate(date) = X.
-  // La NOCHE real = tarde-noche del día X (acostarse→24:00) + madrugada del día X+1 (00:00→despertar).
-  // La FC 24h = todo el día natural X completo (00:00→23:59 del día X).
-  const dayX=prevDate(date);        // día natural que muestra el calendario
-  const dayMorning=date;            // madrugada (fila de BD)
+  const dayX=date;                 // día natural del calendario
+  const dayPrev=prevDate(date);    // día anterior (tarde-noche = 1ª mitad de la noche)
 
-  const[spo2Res,hrRes,stepsRes,spo2PrevRes,hrPrevRes,stepsPrevRes,hrDayXRes]=await Promise.all([
-    // Madrugada (día X+1): SpO2, FC, pasos
-    db.from('spo2_readings').select('measured_at,value').eq('date',dayMorning).order('measured_at'),
-    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayMorning).order('measured_at'),
-    db.from('step_readings').select('measured_at,value').eq('date',dayMorning).order('measured_at'),
-    // Tarde-noche (día X): SpO2, FC, pasos — para completar la primera mitad de la noche
+  const[spo2MorningRes,hrMorningRes,stepsMorningRes,spo2PrevRes,hrPrevRes,stepsPrevRes]=await Promise.all([
+    // Madrugada del día X (00:00→despertar): 2ª mitad de la noche
     db.from('spo2_readings').select('measured_at,value').eq('date',dayX).order('measured_at'),
     db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayX).order('measured_at'),
     db.from('step_readings').select('measured_at,value').eq('date',dayX).order('measured_at'),
-    // FC del día natural X completo (para la gráfica 24h)
-    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayX).order('measured_at'),
+    // Tarde-noche del día X-1 (acostarse→24:00): 1ª mitad de la noche
+    db.from('spo2_readings').select('measured_at,value').eq('date',dayPrev).order('measured_at'),
+    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayPrev).order('measured_at'),
+    db.from('step_readings').select('measured_at,value').eq('date',dayPrev).order('measured_at'),
   ]);
 
-  // Mapear lecturas conservando si son del día X (prev) o X+1 (madrugada),
-  // para poder ordenarlas correctamente cruzando medianoche.
+  // prev=true → tarde-noche del día X-1 (va PRIMERO en la noche, antes de medianoche)
   const mapSpo2=(rows,isPrev)=>(rows||[]).map(r=>({time:r.measured_at.substring(11,16),value:parseFloat(r.value),prev:isPrev}));
   const mapHr=(rows,isPrev)=>(rows||[]).map(r=>({time:r.measured_at.substring(11,16),min:r.min_hr?parseFloat(r.min_hr):null,max:r.max_hr?parseFloat(r.max_hr):null,avg:r.avg_hr?parseFloat(r.avg_hr):null,prev:isPrev}));
   const mapSteps=(rows,isPrev)=>(rows||[]).map(r=>({time:r.measured_at.substring(11,16),value:parseFloat(r.value),prev:isPrev})).filter(s=>s.value>0);
 
+  // La FC 24h del día X = exactamente las lecturas de FC del día X (madrugada + resto del día)
+  const hrDayX=mapHr(hrMorningRes.data,false);
+
   dayDetail[date]={
-    // Noche unida: parte del día X (prev) + madrugada del día X+1
-    spo2:[...mapSpo2(spo2PrevRes.data,true),...mapSpo2(spo2Res.data,false)],
-    hr:[...mapHr(hrPrevRes.data,true),...mapHr(hrRes.data,false)],
-    steps:[...mapSteps(stepsPrevRes.data,true),...mapSteps(stepsRes.data,false)],
+    // Noche unida: tarde-noche del día X-1 (prev) + madrugada del día X
+    spo2:[...mapSpo2(spo2PrevRes.data,true),...mapSpo2(spo2MorningRes.data,false)],
+    hr:[...mapHr(hrPrevRes.data,true),...mapHr(hrMorningRes.data,false)],
+    steps:[...mapSteps(stepsPrevRes.data,true),...mapSteps(stepsMorningRes.data,false)],
     // FC del día natural X completo (gráfica 24h)
-    hrDayX:mapHr(hrDayXRes.data,false),
+    hrDayX:hrDayX,
   };
 }
 
@@ -680,13 +672,11 @@ function renderDays(){
     const ds=`${selectedMonth}-${String(d).padStart(2,'0')}`;
     const has=!!summaries[ds],s=summaries[ds];
     const esParcial=s?.parcial;
-    const pd=prevDate(ds);
-    const pdNum=new Date(pd+'T12:00:00').getDate();
     const btn=document.createElement('button');
     btn.className='day-pill'+(ds===selectedDate?' active':'')+(!has?' no-data':'');
-    btn.title=esParcial?`Noche del ${fmtDateShort(pd)} · FC disponible, noche pendiente del día siguiente`:has?`Noche del ${fmtDateShort(pd)} · Doble clic = forzar recarga`:'Sin datos';
+    btn.title=esParcial?`Noche del ${fmtDateShort(prevDate(ds))} al ${fmtDateShort(ds)} · FC del día disponible, noche pendiente`:has?`Noche del ${fmtDateShort(prevDate(ds))} al ${fmtDateShort(ds)} · Doble clic = forzar recarga`:'Sin datos';
     const dotColor=esParcial?'#6B8BAD':has?sc(s?.spo2_min):'#1E3048';
-    btn.innerHTML=`<span class="day-wd">${dayWd(pd)}</span><span class="day-num">${pdNum}</span><span class="day-dot" style="background:${dotColor}"></span>`;
+    btn.innerHTML=`<span class="day-wd">${dayWd(ds)}</span><span class="day-num">${d}</span><span class="day-dot" style="background:${dotColor}"></span>`;
     if(has){btn.onclick=()=>selectDay(ds);btn.ondblclick=()=>selectDay(ds,true);}
     el.appendChild(btn);
   }
@@ -726,7 +716,7 @@ function showSpo2Modal(){
   const spo2Sleep=filterNight(spo2,sleepStart,sleepEnd);
   const pd=prevDate(selectedDate);
 
-  document.getElementById('spo2ModalTitle').textContent=`Lecturas SpO2 — Noche del ${fmtDateLong(pd)}`;
+  document.getElementById('spo2ModalTitle').textContent=`Lecturas SpO2 — Noche del ${fmtDateShort(prevDate(selectedDate))} al ${fmtDateShort(selectedDate)}`;
   document.getElementById('spo2ModalSubtitle').textContent=`${spo2Sleep.length} lecturas durante la noche (unidas de ambos días)`;
 
   const vals=spo2Sleep.map(p=>p.value);
@@ -801,7 +791,7 @@ async function renderDay(){
   const alertEl=document.getElementById('alertBanner');
   if(spo2_min!=null&&spo2_min<90){
     alertEl.classList.remove('hidden');
-    document.getElementById('alertText').textContent=`Mínimo registrado: ${spo2_min}% — noche del ${fmtDateShort(pd)}`;
+    document.getElementById('alertText').textContent=`Mínimo registrado: ${spo2_min}% — noche del ${fmtDateShort(pd)} al ${fmtDateShort(selectedDate)}`;
   }else alertEl.classList.add('hidden');
 
   // Tarjeta SpO2
@@ -837,7 +827,7 @@ async function renderDay(){
   // Panel dual
   const sleepStart=sleep?.sleep_start?.substring(11,16);
   const sleepEnd=sleep?.sleep_end?.substring(11,16);
-  document.getElementById('dualTitle').textContent=`SpO2 y FC — Noche del ${fmtDateShort(pd)}`;
+  document.getElementById('dualTitle').textContent=`SpO2 y FC — Noche del ${fmtDateShort(pd)} al ${fmtDateShort(selectedDate)}`;
   if(s.parcial){
     document.getElementById('dualSleepLabel').textContent='⏳ Noche pendiente: los datos del sueño se completarán cuando llegue la madrugada del día siguiente. La FC del día sí está disponible abajo.';
   }else{
@@ -975,7 +965,7 @@ async function renderDay(){
     plugins:[rlPlugin('rl2',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
-  document.getElementById('footer').textContent=s.parcial?`Noche del ${fmtDateLong(pd)} · FC del día disponible, noche pendiente · Apple Watch de Sacramento`:`Noche del ${fmtDateLong(pd)} · Apple Watch de Sacramento`;
+  document.getElementById('footer').textContent=s.parcial?`Noche del ${fmtDateShort(pd)} al ${fmtDateShort(selectedDate)} · FC del día disponible, noche pendiente · Apple Watch de Sacramento`:`Noche del ${fmtDateShort(pd)} al ${fmtDateShort(selectedDate)} · Apple Watch de Sacramento`;
 
   // Si la vista combinada está activa, redibujarla con el nuevo día
   if(dualViewMode==='combined'){
@@ -992,7 +982,7 @@ async function renderDay(){
 
 function showScore(score,pd,odi,t90){
   const{label,color}=scoreLabel(score);
-  document.getElementById('scoreNightLabel').innerHTML=`<strong>Noche del ${fmtDateShort(pd)}</strong>`;
+  document.getElementById('scoreNightLabel').innerHTML=`<strong>Noche del ${fmtDateShort(pd)} al ${fmtDateShort(selectedDate)}</strong>`;
   document.getElementById('scoreNum').textContent=score!=null?score+'/10':'–';
   document.getElementById('scoreNum').style.color=color;
   document.getElementById('scoreLabel').textContent=label;
@@ -1031,8 +1021,8 @@ function detectHRPeaks(hrData){
 
 async function renderHR24(){
   if(!selectedDate)return;
-  const pd=prevDate(selectedDate); // día natural X que muestra el calendario
-  document.getElementById('hr24Title').textContent=`Frecuencia cardíaca 24h — ${fmtDateShort(pd)}`;
+  const pd=prevDate(selectedDate); // día anterior (para etiqueta de la noche)
+  document.getElementById('hr24Title').textContent=`Frecuencia cardíaca 24h — ${fmtDateShort(selectedDate)}`;
   document.getElementById('hr24Wrap').innerHTML='<div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>';
   dc('hr24');
 
