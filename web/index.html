@@ -328,7 +328,7 @@
           <div class="panel-title" id="hr24Title" style="margin-bottom:3px">Frecuencia cardíaca — 24 horas</div>
           <div style="font-size:11px;color:var(--muted)" id="hr24Sub">Picos atípicos marcados en rojo</div>
         </div>
-        <div style="display:flex;gap:6px"><button class="dual-btn" onclick="downloadHR24CSV()">↓ CSV</button><button class="dual-btn" onclick="refreshHR24()">↺ Recargar</button></div>
+        <div style="display:flex;gap:6px"><button class="dual-btn" onclick="showHR24Modal()">📋 Ver datos</button><button class="dual-btn" onclick="downloadHR24CSV()">↓ CSV</button><button class="dual-btn" onclick="refreshHR24()">↺ Recargar</button></div>
       </div>
       <div class="legend" style="margin-top:0;margin-bottom:10px">
         <div class="legend-item"><span class="legend-line" style="background:#C25880"></span>FC media</div>
@@ -403,6 +403,24 @@
       </table>
     </div>
     <div class="modal-footer"><button class="btn-cancel" onclick="closeSpo2Modal()">Cerrar</button></div>
+  </div>
+</div>
+
+<!-- Modal FC del día -->
+<div id="hr24Modal" class="modal-overlay hidden" onclick="if(event.target===this)closeHR24Modal()">
+  <div class="modal spo2-modal">
+    <div class="spo2-modal-header">
+      <h3 id="hr24ModalTitle">FC del día</h3>
+      <p id="hr24ModalSubtitle" style="margin-bottom:0"></p>
+    </div>
+    <div class="spo2-stats-row" id="hr24ModalSummary"></div>
+    <div class="spo2-table-wrap">
+      <table class="spo2-table">
+        <thead><tr><th>Hora</th><th>FC media</th><th>Mín–Máx</th><th>Estado</th></tr></thead>
+        <tbody id="hr24TableBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-footer"><button class="btn-cancel" onclick="closeHR24Modal()">Cerrar</button></div>
   </div>
 </div>
 
@@ -1228,6 +1246,54 @@ async function refreshHR24(){
   await renderHR24();
 }
 
+// ── Modal: todas las lecturas de FC del día ───────────────────────────────
+function showHR24Modal(){
+  if(!selectedDate||!dayDetail[selectedDate])return;
+  const hr=dayDetail[selectedDate].hrDayX||[];
+  const hrSorted=[...hr].sort((a,b)=>a.time.localeCompare(b.time));
+
+  document.getElementById('hr24ModalTitle').textContent=`FC del día — ${fmtDateLong(selectedDate)}`;
+
+  if(!hrSorted.length){
+    document.getElementById('hr24ModalSubtitle').textContent='Sin datos de FC para este día.';
+    document.getElementById('hr24ModalSummary').innerHTML='';
+    document.getElementById('hr24TableBody').innerHTML='';
+    document.getElementById('hr24Modal').classList.remove('hidden');
+    return;
+  }
+
+  const{mean,peaks}=detectHRPeaks(hrSorted);
+  const peakTimes=new Set(peaks.map(p=>p.time));
+  const avgs=hrSorted.map(p=>p.avg).filter(v=>v!=null);
+  const minV=avgs.length?Math.round(Math.min(...avgs)):null;
+  const maxV=avgs.length?Math.round(Math.max(...avgs)):null;
+  const primera=hrSorted[0].time, ultima=hrSorted[hrSorted.length-1].time;
+
+  document.getElementById('hr24ModalSubtitle').textContent=`${hrSorted.length} lecturas · de ${primera} a ${ultima}`;
+
+  document.getElementById('hr24ModalSummary').innerHTML=[
+    [mean!=null?mean+' bpm':'–','var(--pink)','FC media'],
+    [minV!=null?minV+' bpm':'–','#1D9E75','Mínima'],
+    [maxV!=null?maxV+' bpm':'–',maxV>100?'#D94040':'var(--text)','Máxima'],
+    [peaks.length,peaks.length>0?'#D94040':'#1D9E75','Picos atíp.'],
+  ].map(([v,c,l])=>`<div class="spo2-stat"><div class="spo2-stat-val" style="color:${c}">${v}</div><div class="spo2-stat-lbl">${l}</div></div>`).join('');
+
+  const tbody=document.getElementById('hr24TableBody');
+  tbody.innerHTML='';
+  hrSorted.forEach(p=>{
+    const isPeak=peakTimes.has(p.time);
+    const avg=p.avg!=null?Math.round(p.avg):null;
+    const rango=(p.min!=null&&p.max!=null)?`${Math.round(p.min)}–${Math.round(p.max)}`:'–';
+    const badge=isPeak?'<span class="spo2-badge badge-bad">PICO</span>':avg!=null&&avg>100?'<span class="spo2-badge badge-warn">Alta</span>':'<span class="spo2-badge badge-good">Normal</span>';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:${isPeak?'#D94040':'var(--pink)'}">${avg!=null?avg+' bpm':'–'}</td><td style="color:var(--muted)">${rango}</td><td>${badge}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('hr24Modal').classList.remove('hidden');
+}
+function closeHR24Modal(){document.getElementById('hr24Modal').classList.add('hidden');}
+
 // ── Toggle vista separada / superpuesta ───────────────────────────────────
 function toggleDualView(){
   dualViewMode=dualViewMode==='separate'?'combined':'separate';
@@ -1264,15 +1330,24 @@ function renderCombinedChart(){
   const hrMap={};hrSleep.forEach(p=>hrMap[p.time]=p.avg);
   const stepsMap={};stepsSleep.forEach(p=>stepsMap[p.time]=p.value);
 
-  // Rango de FC dinámico pero con margen, para que no quede aplastada abajo
+  // ESTRATEGIA: separar las series en BANDAS verticales que no se solapan.
+  //  · SpO2 ocupa la banda SUPERIOR (60%-100% de altura)
+  //  · FC  ocupa la banda INFERIOR (0%-45% de altura)
+  // Se consigue ampliando artificialmente cada eje para "empujar" su línea a su zona.
+
+  // SpO2 real 78-100. Para que ocupe solo la mitad superior, el eje va de 56 a 100.
+  // (los valores 78-100 caen en la mitad de arriba)
+  const ySpo2Min=56, ySpo2Max=100;
+
+  // FC: rango real ajustado. Para que ocupe solo la mitad inferior, ampliamos por arriba.
   const hrVals=hrSleep.map(p=>p.avg).filter(v=>v!=null);
   const hrMin=hrVals.length?Math.min(...hrVals):50;
   const hrMax=hrVals.length?Math.max(...hrVals):70;
-  const hrPad=Math.max(8,(hrMax-hrMin)*0.4);
-  // El eje de FC ocupa solo la MITAD SUPERIOR del gráfico, el SpO2 la zona principal
-  // Para separarlos visualmente: FC arriba (rango estrecho centrado alto), SpO2 abajo.
-  const hrAxisMin=Math.floor(hrMin-hrPad);
-  const hrAxisMax=Math.ceil(hrMax+hrPad*3); // más margen arriba para empujar la FC hacia el centro
+  const hrCenter=(hrMin+hrMax)/2;
+  const hrSpan=Math.max(20,(hrMax-hrMin)*1.5);
+  // El eje FC: la línea real queda en la mitad inferior. Ampliamos mucho por arriba.
+  const yHrMin=Math.floor(hrMin-hrSpan*0.3);
+  const yHrMax=Math.ceil(hrMax+hrSpan*1.4);
 
   dc('combined');
   document.getElementById('combinedWrap').innerHTML='<canvas id="combinedChart"></canvas>';
@@ -1280,21 +1355,18 @@ function renderCombinedChart(){
     data:{
       labels:allTimes,
       datasets:[
-        // Pasos como barras (eje propio oculto, abajo)
         {type:'bar',label:'Pasos',data:allTimes.map(t=>stepsMap[t]??null),
-         backgroundColor:'rgba(230,150,30,0.65)',borderColor:'#E69620',borderWidth:0,
-         yAxisID:'ySteps',order:5,barThickness:'flex',maxBarThickness:10},
-        // SpO2 línea (eje izquierdo)
+         backgroundColor:'rgba(230,150,30,0.7)',borderWidth:0,
+         yAxisID:'ySteps',order:5,barThickness:'flex',maxBarThickness:8},
         {type:'line',label:'SpO2',data:allTimes.map(t=>spo2Map[t]??null),
          borderColor:'#1D9E75',borderWidth:2.5,
          pointBackgroundColor:allTimes.map(t=>sc(spo2Map[t])),
          pointRadius:allTimes.map(t=>{const v=spo2Map[t];return v==null?0:v<90?5:v<94?4:2.5;}),
          tension:0.3,spanGaps:true,yAxisID:'ySpo2',order:1,
          segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}},
-        // FC línea (eje derecho)
         {type:'line',label:'FC',data:allTimes.map(t=>hrMap[t]!=null?Math.round(hrMap[t]):null),
-         borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:1.5,
-         tension:0.3,spanGaps:true,yAxisID:'yHr',order:2,borderDash:[]},
+         borderColor:'#C25880',borderWidth:2.5,pointBackgroundColor:'#C25880',pointRadius:2,
+         tension:0.3,spanGaps:true,yAxisID:'yHr',order:2},
       ]
     },
     options:{
@@ -1312,12 +1384,15 @@ function renderCombinedChart(){
       },
       scales:{
         x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:8},grid:{color:'#1E3048'}},
-        // SpO2: ocupa todo el rango vertical real (78-100)
-        ySpo2:{position:'left',min:78,max:100,ticks:{color:'#1D9E75',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'},title:{display:true,text:'SpO2 (%)',color:'#1D9E75',font:{size:10,weight:'bold'}}},
-        // FC: rango propio con margen para que no quede pegada al fondo
-        yHr:{position:'right',min:hrAxisMin,max:hrAxisMax,ticks:{color:'#C25880',font:{size:9},callback:v=>v+''},grid:{display:false},title:{display:true,text:'FC (bpm)',color:'#C25880',font:{size:10,weight:'bold'}}},
-        // Pasos: ocupan solo el 20% inferior del gráfico
-        ySteps:{position:'right',display:false,min:0,max:Math.max(40,...stepsSleep.map(p=>p.value))*5},
+        // SpO2 en la banda superior
+        ySpo2:{position:'left',min:ySpo2Min,max:ySpo2Max,
+          ticks:{color:'#1D9E75',font:{size:9},stepSize:5,callback:v=>v>=78?v+'%':''},
+          grid:{color:'#1E3048'},title:{display:true,text:'SpO2 (%)',color:'#1D9E75',font:{size:10,weight:'bold'}}},
+        // FC en la banda inferior
+        yHr:{position:'right',min:yHrMin,max:yHrMax,
+          ticks:{color:'#C25880',font:{size:9},callback:v=>v<=hrMax+5?v:''},
+          grid:{display:false},title:{display:true,text:'FC (bpm)',color:'#C25880',font:{size:10,weight:'bold'}}},
+        ySteps:{position:'right',display:false,min:0,max:Math.max(40,...stepsSleep.map(p=>p.value))*6},
       }
     },
     plugins:[rlPlugin('rlc',[[94,'#C98B0A'],[90,'#D94040']])]
