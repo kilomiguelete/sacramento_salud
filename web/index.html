@@ -108,6 +108,19 @@
   .loader-text{color:var(--muted);font-size:13px;}
   .error-msg{color:var(--bad);text-align:center;padding:40px;}
   .footer{text-align:center;color:var(--muted);font-size:10px;letter-spacing:.06em;margin-top:16px;text-transform:uppercase;}
+  .msum-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;}
+  @media(max-width:760px){.msum-grid{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:380px){.msum-grid{grid-template-columns:1fr;}}
+  .msum-stat{background:var(--bg);border-radius:8px;padding:12px 14px;}
+  .msum-stat-label{font-size:9px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
+  .msum-stat-value{font-size:22px;font-weight:700;line-height:1;letter-spacing:-.02em;}
+  .msum-stat-sub{font-size:11px;color:var(--muted);margin-top:4px;}
+  .msum-highlights{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  @media(max-width:640px){.msum-highlights{grid-template-columns:1fr;}}
+  .msum-hl{background:var(--bg);border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .msum-hl-label{font-size:11px;color:var(--muted);}
+  .msum-hl-val{font-size:13px;font-weight:600;text-align:right;}
+  .msum-empty{color:var(--muted);font-size:13px;text-align:center;padding:20px;}
   /* Modals */
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;}
   .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;width:100%;max-width:420px;}
@@ -351,6 +364,12 @@
         <button class="dual-btn" onclick="downloadMonthCSV()" style="padding:3px 10px">↓ CSV</button>
       </div>
       <div style="height:110px;position:relative"><canvas id="spo2MonthChart"></canvas></div>
+    </div>
+
+    <!-- Resumen del mes -->
+    <div class="panel" id="monthSummaryPanel">
+      <div class="panel-title" id="monthSummaryTitle" style="margin-bottom:14px">Resumen del mes</div>
+      <div id="monthSummaryContent"></div>
     </div>
 
     <div class="footer" id="footer"></div>
@@ -965,6 +984,9 @@ async function renderDay(){
     plugins:[rlPlugin('rl2',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
+  // Resumen del mes
+  renderMonthSummary();
+
   document.getElementById('footer').textContent=s.parcial?`Noche del ${fmtDateShort(pd)} al ${fmtDateShort(selectedDate)} · FC del día disponible, noche pendiente · Apple Watch de Sacramento`:`Noche del ${fmtDateShort(pd)} al ${fmtDateShort(selectedDate)} · Apple Watch de Sacramento`;
 
   // Si la vista combinada está activa, redibujarla con el nuevo día
@@ -979,6 +1001,107 @@ async function renderDay(){
   // Renderizar FC 24h (usa el mismo dayDetail ya cargado)
   renderHR24();
 }
+
+// ── Resumen del mes ───────────────────────────────────────────────────────
+function renderMonthSummary(){
+  const mDays=monthsMap[selectedMonth]||[];
+  document.getElementById('monthSummaryTitle').textContent=`Resumen del mes — ${fmtMonthLabel(selectedMonth)}`;
+  const cont=document.getElementById('monthSummaryContent');
+
+  // Recoger noches con datos reales (con SpO2 o sueño)
+  const noches=mDays.filter(d=>{const s=summaries[d];return s&&(s.spo2_min!=null||s.sleep);});
+  if(!noches.length){
+    cont.innerHTML='<div class="msum-empty">Sin datos suficientes este mes todavía.</div>';
+    return;
+  }
+
+  // Helpers de agregación
+  const vals=key=>noches.map(d=>summaries[d][key]).filter(v=>v!=null);
+  const avg=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null;
+
+  const spo2Mins=vals('spo2_min');
+  const avgSpo2Min=avg(spo2Mins);
+  const peorSpo2=spo2Mins.length?Math.min(...spo2Mins):null;
+  const mejorSpo2=spo2Mins.length?Math.max(...spo2Mins):null;
+
+  // Noches críticas y de aviso
+  const nochesCrit=noches.filter(d=>summaries[d].spo2_min!=null&&summaries[d].spo2_min<90).length;
+  const nochesWarn=noches.filter(d=>summaries[d].spo2_min!=null&&summaries[d].spo2_min>=90&&summaries[d].spo2_min<94).length;
+
+  // Sueño
+  const sleeps=noches.map(d=>summaries[d].sleep?.total_sleep).filter(v=>v!=null);
+  const avgSleep=avg(sleeps);
+
+  // Eficiencia
+  const effs=noches.map(d=>{const s=summaries[d].sleep;if(!s)return null;const ib=s.in_bed>0?s.in_bed:((s.total_sleep||0)+(s.awake||0));return s.total_sleep&&ib>0?s.total_sleep/ib*100:null;}).filter(v=>v!=null);
+  const avgEff=avg(effs);
+
+  // Perturbaciones
+  const perts=noches.map(d=>summaries[d].vitals?.breathing_disturbances).filter(v=>v!=null);
+  const avgPert=avg(perts);
+
+  // FC reposo
+  const rhrs=noches.map(d=>summaries[d].vitals?.resting_heart_rate).filter(v=>v!=null);
+  const avgRhr=avg(rhrs);
+
+  // Caídas totales del mes
+  const totalEv94=noches.reduce((a,d)=>a+(summaries[d].ev94||0),0);
+  const totalEv90=noches.reduce((a,d)=>a+(summaries[d].ev90||0),0);
+
+  // Mejor y peor noche por score aproximado (usamos spo2_min como proxy rápido + perturbaciones)
+  let peorNoche=null,mejorNoche=null;
+  noches.forEach(d=>{
+    const s=summaries[d];
+    if(s.spo2_min==null)return;
+    if(!peorNoche||s.spo2_min<summaries[peorNoche].spo2_min)peorNoche=d;
+    if(!mejorNoche||s.spo2_min>summaries[mejorNoche].spo2_min)mejorNoche=d;
+  });
+
+  const cs=v=>v==null?'var(--text)':v<90?'#D94040':v<94?'#C98B0A':'#1D9E75';
+
+  cont.innerHTML=`
+    <div class="msum-grid">
+      <div class="msum-stat">
+        <div class="msum-stat-label">SpO2 mín promedio</div>
+        <div class="msum-stat-value" style="color:${cs(avgSpo2Min)}">${avgSpo2Min!=null?Math.round(avgSpo2Min)+'%':'–'}</div>
+        <div class="msum-stat-sub">${noches.length} noches con datos</div>
+      </div>
+      <div class="msum-stat">
+        <div class="msum-stat-label">Noches críticas</div>
+        <div class="msum-stat-value" style="color:${nochesCrit>0?'#D94040':'#1D9E75'}">${nochesCrit}</div>
+        <div class="msum-stat-sub">${nochesWarn} con aviso (&lt;94%)</div>
+      </div>
+      <div class="msum-stat">
+        <div class="msum-stat-label">Sueño medio</div>
+        <div class="msum-stat-value" style="color:var(--purple)">${avgSleep!=null?fmtH(avgSleep):'–'}</div>
+        <div class="msum-stat-sub">${avgEff!=null?'efic. '+Math.round(avgEff)+'%':'–'}</div>
+      </div>
+      <div class="msum-stat">
+        <div class="msum-stat-label">Perturbaciones medias</div>
+        <div class="msum-stat-value" style="color:${avgPert>15?'#D94040':avgPert>10?'#C98B0A':'var(--text)'}">${avgPert!=null?avgPert.toFixed(1):'–'}</div>
+        <div class="msum-stat-sub">eventos/hora</div>
+      </div>
+    </div>
+    <div class="msum-highlights">
+      <div class="msum-hl">
+        <span class="msum-hl-label">🔴 Peor noche (SpO2 mín)</span>
+        <span class="msum-hl-val" style="color:${cs(peorSpo2)}">${peorNoche?fmtDateShort(prevDate(peorNoche))+' al '+fmtDateShort(peorNoche)+' · '+peorSpo2+'%':'–'}</span>
+      </div>
+      <div class="msum-hl">
+        <span class="msum-hl-label">🟢 Mejor noche (SpO2 mín)</span>
+        <span class="msum-hl-val" style="color:${cs(mejorSpo2)}">${mejorNoche?fmtDateShort(prevDate(mejorNoche))+' al '+fmtDateShort(mejorNoche)+' · '+mejorSpo2+'%':'–'}</span>
+      </div>
+      <div class="msum-hl">
+        <span class="msum-hl-label">FC en reposo media</span>
+        <span class="msum-hl-val" style="color:var(--pink)">${avgRhr!=null?Math.round(avgRhr)+' bpm':'–'}</span>
+      </div>
+      <div class="msum-hl">
+        <span class="msum-hl-label">Caídas SpO2 del mes</span>
+        <span class="msum-hl-val">${totalEv94} bajo 94%${totalEv90>0?' · '+totalEv90+' bajo 90%':''}</span>
+      </div>
+    </div>`;
+}
+
 
 function showScore(score,pd,odi,t90){
   const{label,color}=scoreLabel(score);
