@@ -344,6 +344,26 @@
       <div id="hr24Peaks" style="margin-top:12px"></div>
     </div>
 
+    <!-- SpO2 24h -->
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+        <div>
+          <div class="panel-title" id="spo224Title" style="margin-bottom:3px">Saturación de oxígeno — 24 horas</div>
+          <div style="font-size:11px;color:var(--muted)" id="spo224Sub">Saturación a lo largo del día</div>
+        </div>
+        <div style="display:flex;gap:6px"><button class="dual-btn" onclick="showSpo224Modal()">📋 Ver datos</button><button class="dual-btn" onclick="refreshSpo224()">↺ Recargar</button></div>
+      </div>
+      <div class="legend" style="margin-top:0;margin-bottom:10px">
+        <div class="legend-item"><span class="legend-line" style="background:#1D9E75"></span>SpO2</div>
+        <div class="legend-item"><span class="legend-line" style="background:#C98B0A;border-top:1px dashed #C98B0A;height:0"></span>94%</div>
+        <div class="legend-item"><span class="legend-line" style="background:#D94040;border-top:1px dashed #D94040;height:0"></span>90%</div>
+        <div class="legend-item"><span style="display:inline-block;width:3px;height:12px;background:#E69620;border-radius:1px"></span>Movimiento (pasar ratón para ver pasos)</div>
+      </div>
+      <div style="height:200px;position:relative" id="spo224Wrap">
+        <div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>
+      </div>
+    </div>
+
     <!-- Fases + caídas -->
     <div class="panel-row">
       <div class="panel">
@@ -879,6 +899,10 @@ async function loadDayDetail(date,force=false){
   const todosSteps=[...mapSteps(stepsPrevRes.data,true),...mapSteps(stepsMorningRes.data,false)];
   const stepsDayX=todosSteps.filter(p=>p.fecha===dayX);
 
+  // SpO2 del día natural X completo (gráfica 24h de saturación)
+  const todasSpo2=[...mapSpo2(spo2PrevRes.data,true),...mapSpo2(spo2MorningRes.data,false)];
+  const spo2DayX=todasSpo2.filter(p=>p.fecha===dayX).sort((a,b)=>a.time.localeCompare(b.time));
+
   dayDetail[date]={
     fechaSolicitada:dayX,
     // Noche unida: tarde-noche del día X-1 (prev) + madrugada del día X
@@ -889,6 +913,8 @@ async function loadDayDetail(date,force=false){
     hrDayX:hrDayX,
     // Pasos del día natural X completo
     stepsDayX:stepsDayX,
+    // SpO2 del día natural X completo (gráfica 24h)
+    spo2DayX:spo2DayX,
   };
 }
 
@@ -980,6 +1006,22 @@ function showSpo2Modal(){
   ].map(([v,c,l])=>`<div class="spo2-stat"><div class="spo2-stat-val" style="color:${c}">${v}</div><div class="spo2-stat-lbl">${l}</div></div>`).join('');
 
   // Histograma
+  drawSpo2Histo(spo2Sleep);
+
+  // Tabla
+  const tbody=document.getElementById('spo2TableBody');tbody.innerHTML='';
+  spo2Sleep.forEach(p=>{
+    const isCrit=p.value<90,isWarn=p.value<94;
+    const cls=isCrit?'badge-bad':isWarn?'badge-warn':'badge-good';
+    const lbl=isCrit?'CRÍTICO':isWarn?'Bajo':'Normal';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="color:var(--muted);font-size:11px">${p.fecha?fmtDateShort(p.fecha):'–'}</td><td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:${sc(p.value)}">${p.value}%</td><td><span class="spo2-badge ${cls}">${lbl}</span></td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('spo2Modal').classList.remove('hidden');
+}
+// Dibuja el histograma de distribución de SpO2 (reutilizable)
+function drawSpo2Histo(arr){
   dc('spo2Histo');
   const bins=[
     {label:'<88',min:0,max:88,color:'#8B0000'},
@@ -990,7 +1032,7 @@ function showSpo2Modal(){
     {label:'96–97',min:96,max:98,color:'#5CB85C'},
     {label:'98+', min:98,max:101,color:'#1D9E75'},
   ];
-  const binCounts=bins.map(b=>spo2Sleep.filter(p=>p.value>=b.min&&p.value<b.max).length);
+  const binCounts=bins.map(b=>arr.filter(p=>p.value>=b.min&&p.value<b.max).length);
   charts.spo2Histo=new Chart(document.getElementById('spo2HistoChart'),{
     type:'bar',
     data:{
@@ -1004,25 +1046,13 @@ function showSpo2Modal(){
     },
     options:{
       responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},title:{display:true,text:'Distribución de SpO2 durante el sueño',color:'#6B8BAD',font:{size:10}}},
+      plugins:{legend:{display:false},title:{display:true,text:'Distribución de SpO2',color:'#6B8BAD',font:{size:10}}},
       scales:{
         x:{ticks:{color:'#6B8BAD',font:{size:9}},grid:{display:false}},
         y:{ticks:{color:'#6B8BAD',font:{size:9}},grid:{color:'#1E3048'},beginAtZero:true,title:{display:true,text:'Nº lecturas',color:'#6B8BAD',font:{size:9}}},
       }
     }
   });
-
-  // Tabla
-  const tbody=document.getElementById('spo2TableBody');tbody.innerHTML='';
-  spo2Sleep.forEach(p=>{
-    const isCrit=p.value<90,isWarn=p.value<94;
-    const cls=isCrit?'badge-bad':isWarn?'badge-warn':'badge-good';
-    const lbl=isCrit?'CRÍTICO':isWarn?'Bajo':'Normal';
-    const tr=document.createElement('tr');
-    tr.innerHTML=`<td style="color:var(--muted);font-size:11px">${p.fecha?fmtDateShort(p.fecha):'–'}</td><td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:${sc(p.value)}">${p.value}%</td><td><span class="spo2-badge ${cls}">${lbl}</span></td>`;
-    tbody.appendChild(tr);
-  });
-  document.getElementById('spo2Modal').classList.remove('hidden');
 }
 function closeSpo2Modal(){dc('spo2Histo');document.getElementById('spo2Modal').classList.add('hidden');}
 
@@ -1348,6 +1378,8 @@ async function renderDay(){
 
   // Renderizar FC 24h (usa el mismo dayDetail ya cargado)
   renderHR24();
+  // Renderizar SpO2 24h
+  renderSpo224();
 }
 
 // ── Resumen del mes ───────────────────────────────────────────────────────
@@ -1542,7 +1574,7 @@ async function renderHR24(){
         return `${n}: ${Math.round(ctx.parsed.y)} bpm${isPeak&&ctx.datasetIndex===2?'  ⚠ PICO':''}`;
       }}}},
       scales:{
-        x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:12},grid:{color:'#1E3048'}},
+        x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:10,maxRotation:0,minRotation:0,autoSkip:true},grid:{color:'#1E3048'}},
         y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}},
       }
     },
@@ -1575,6 +1607,91 @@ async function refreshHR24(){
   if(!selectedDate)return;
   delete dayDetail[selectedDate];
   await renderHR24();
+  await renderSpo224();
+}
+
+// ── SpO2 24 horas ─────────────────────────────────────────────────────────
+async function renderSpo224(){
+  if(!selectedDate)return;
+  document.getElementById('spo224Title').textContent=`Saturación de oxígeno 24h — ${fmtDateShort(selectedDate)}`;
+  document.getElementById('spo224Wrap').innerHTML='<div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>';
+  dc('spo224');
+
+  await loadDayDetail(selectedDate);
+  const spo2=dayDetail[selectedDate].spo2DayX||[];
+
+  if(!spo2||!spo2.length){
+    document.getElementById('spo224Wrap').innerHTML='<div class="chart-loading">Sin datos de SpO2 para este día</div>';
+    document.getElementById('spo224Sub').textContent='Sin datos de SpO2';
+    return;
+  }
+
+  const spo2Sorted=[...spo2].sort((a,b)=>a.time.localeCompare(b.time));
+  const vals=spo2Sorted.map(p=>p.value);
+  const minV=Math.min(...vals), avgV=Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+  const primera=spo2Sorted[0].time, ultima=spo2Sorted[spo2Sorted.length-1].time;
+  document.getElementById('spo224Sub').textContent=`Datos de ${primera} a ${ultima} · Media: ${avgV}% · Mínima: ${minV}%`;
+
+  document.getElementById('spo224Wrap').innerHTML='<canvas id="spo224Chart"></canvas>';
+  const stepsDayX=dayDetail[selectedDate].stepsDayX||[];
+  const labels=spo2Sorted.map(p=>p.time);
+
+  charts.spo224=new Chart(document.getElementById('spo224Chart'),{
+    type:'line',
+    data:{labels,datasets:[{label:'SpO2',data:spo2Sorted.map(p=>p.value),borderColor:'#1D9E75',borderWidth:1.5,
+      pointBackgroundColor:spo2Sorted.map(p=>sc(p.value)),
+      pointRadius:spo2Sorted.map(p=>p.value<90?4:p.value<94?3:1.5),
+      tension:0.3,spanGaps:true,fill:{target:'origin',above:'rgba(29,158,117,.06)'},
+      segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.parsed.y!=null?`SpO2: ${ctx.parsed.y}%`:null}}},
+      scales:{
+        x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:10,maxRotation:0,minRotation:0,autoSkip:true},grid:{color:'#1E3048'}},
+        y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}},
+      }
+    },
+    plugins:[stepBandsPlugin('sbSpo224',labels,stepsDayX),rlPlugin('rlSpo224',[[94,'#C98B0A'],[90,'#D94040']])]
+  });
+}
+async function refreshSpo224(){
+  if(!selectedDate)return;
+  delete dayDetail[selectedDate];
+  await renderSpo224();
+}
+// Modal: todas las lecturas de SpO2 del día completo
+function showSpo224Modal(){
+  if(!selectedDate||!dayDetail[selectedDate])return;
+  const spo2=dayDetail[selectedDate].spo2DayX||[];
+  const spo2Sorted=[...spo2].sort((a,b)=>a.time.localeCompare(b.time));
+  document.getElementById('spo2ModalTitle').textContent=`Lecturas SpO2 24h — ${fmtDateLong(selectedDate)}`;
+  if(!spo2Sorted.length){
+    document.getElementById('spo2ModalSubtitle').textContent='Sin datos de SpO2 para este día.';
+    document.getElementById('spo2ModalSummary').innerHTML='';
+    document.getElementById('spo2TableBody').innerHTML='';
+    dc('spo2Histo');
+    document.getElementById('spo2Modal').classList.remove('hidden');
+    return;
+  }
+  const dias=[...new Set(spo2Sorted.map(p=>p.fecha))].sort();
+  const vals=spo2Sorted.map(p=>p.value);
+  const minV=Math.min(...vals),maxV=Math.max(...vals),avgV=Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+  document.getElementById('spo2ModalSubtitle').textContent=`${spo2Sorted.length} lecturas · de ${spo2Sorted[0].time} a ${spo2Sorted[spo2Sorted.length-1].time} · día(s): ${dias.join(', ')}`;
+  document.getElementById('spo2ModalSummary').innerHTML=[
+    [minV+'%',sc(minV),'Mínima'],
+    [avgV+'%','var(--text)','Media'],
+    [maxV+'%','#1D9E75','Máxima'],
+  ].map(([v,c,l])=>`<div class="spo2-stat"><div class="spo2-stat-val" style="color:${c}">${v}</div><div class="spo2-stat-lbl">${l}</div></div>`).join('');
+  // Histograma reutilizando el del modal nocturno
+  drawSpo2Histo(spo2Sorted);
+  const tbody=document.getElementById('spo2TableBody');tbody.innerHTML='';
+  spo2Sorted.forEach(p=>{
+    const v=p.value;const cls=v<90?'badge-bad':v<94?'badge-warn':'badge-good';const lbl=v<90?'Baja':v<94?'Leve':'Normal';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="color:var(--muted);font-size:11px">${p.fecha?fmtDateShort(p.fecha):'–'}</td><td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:${sc(v)}">${v}%</td><td><span class="spo2-badge ${cls}">${lbl}</span></td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('spo2Modal').classList.remove('hidden');
 }
 
 // ── Modal: todas las lecturas de FC del día ───────────────────────────────
