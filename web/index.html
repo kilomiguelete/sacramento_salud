@@ -416,7 +416,7 @@
     <div class="spo2-stats-row" id="hr24ModalSummary"></div>
     <div class="spo2-table-wrap">
       <table class="spo2-table">
-        <thead><tr><th>Hora</th><th>FC media</th><th>Mín–Máx</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Día</th><th>Hora</th><th>FC media</th><th>Mín–Máx</th><th>Estado</th></tr></thead>
         <tbody id="hr24TableBody"></tbody>
       </table>
     </div>
@@ -514,6 +514,21 @@ const fmtMonthLabel=m=>new Date(m+'-15').toLocaleDateString('es-ES',{month:'shor
 const fmtDateLong=d=>new Date(d+'T12:00:00').toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 const fmtDateMed=d=>new Date(d+'T12:00:00').toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'});
 const fmtDateShort=d=>new Date(d+'T12:00:00').toLocaleDateString('es-ES',{day:'numeric',month:'short'});
+
+// ── Conversión de timestamp UTC → hora local de Madrid ────────────────────
+// Supabase guarda measured_at en UTC. Estas funciones devuelven la hora y fecha
+// LOCALES de España, para que coincidan con lo que registró el Apple Watch.
+function localTime(ts){
+  // ts ej: "2026-06-22T22:06:00+00:00" (UTC) → "00:06" (Madrid)
+  const d=new Date(ts);
+  return d.toLocaleTimeString('es-ES',{timeZone:'Europe/Madrid',hour:'2-digit',minute:'2-digit',hour12:false});
+}
+function localDate(ts){
+  // ts UTC → "2026-06-23" (fecha local de Madrid)
+  const d=new Date(ts);
+  // en-CA da formato YYYY-MM-DD
+  return d.toLocaleDateString('en-CA',{timeZone:'Europe/Madrid'});
+}
 const WD=['do','lu','ma','mi','ju','vi','sá'];
 const dayWd=d=>WD[new Date(d+'T12:00:00').getDay()];
 function prevDate(d){const dt=new Date(d+'T12:00:00');dt.setDate(dt.getDate()-1);return dt.toISOString().substring(0,10);}
@@ -545,21 +560,21 @@ const stepBandsPlugin=(id,labels,steps)=>({id,beforeDraw(ch){
   ctx.restore();
 }});
 function inSleepWindow(t,start,end){if(!start||!end)return true;if(start<=end)return t>=start&&t<=end;return t>=start||t<=end;}
-// Clave de orden para la noche unida: las lecturas del día anterior (prev=tarde-noche)
-// van antes que las de la madrugada. Devuelve minutos desde el inicio de la tarde-noche.
+// Clave de orden cronológico real: usa measured_at (instante UTC) si existe,
+// si no, reconstruye con el flag prev.
 function nightSortKey(p){
+  if(p.measured_at)return new Date(p.measured_at).getTime();
   const[h,m]=p.time.split(':').map(Number);
   const mins=h*60+m;
-  // prev (día X, tarde-noche): tal cual. madrugada (día X+1): +24h para que vaya después.
-  return p.prev ? mins : mins+1440;
+  return p.prev?mins:mins+1440;
 }
-// Filtra y ORDENA las lecturas de la noche unida cruzando medianoche.
+// Filtra y ORDENA las lecturas de la noche cruzando medianoche.
 function filterNight(arr,start,end){
   const inWin=(arr||[]).filter(p=>{
     if(!start||!end)return true;
-    // prev = tarde-noche del día X: debe estar >= hora de acostarse
-    if(p.prev) return p.time>=start;
-    // madrugada del día X+1: debe estar <= hora de despertar
+    // prev = tarde-noche (antes de medianoche): hora local >= acostarse
+    if(p.prev)return p.time>=start;
+    // madrugada (después de medianoche): hora local <= despertar
     return p.time<=end;
   });
   return inWin.sort((a,b)=>nightSortKey(a)-nightSortKey(b));
@@ -662,24 +677,28 @@ async function loadDayDetail(date,force=false){
 
   const[spo2MorningRes,hrMorningRes,stepsMorningRes,spo2PrevRes,hrPrevRes,stepsPrevRes]=await Promise.all([
     // Madrugada del día X (00:00→despertar): 2ª mitad de la noche
-    db.from('spo2_readings').select('measured_at,value').eq('date',dayX).order('measured_at'),
-    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayX).order('measured_at'),
-    db.from('step_readings').select('measured_at,value').eq('date',dayX).order('measured_at'),
+    db.from('spo2_readings').select('measured_at,value').eq('date',dayX).order('measured_at').limit(5000),
+    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayX).order('measured_at').limit(5000),
+    db.from('step_readings').select('measured_at,value').eq('date',dayX).order('measured_at').limit(5000),
     // Tarde-noche del día X-1 (acostarse→24:00): 1ª mitad de la noche
-    db.from('spo2_readings').select('measured_at,value').eq('date',dayPrev).order('measured_at'),
-    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayPrev).order('measured_at'),
-    db.from('step_readings').select('measured_at,value').eq('date',dayPrev).order('measured_at'),
+    db.from('spo2_readings').select('measured_at,value').eq('date',dayPrev).order('measured_at').limit(5000),
+    db.from('heart_rate_readings').select('measured_at,min_hr,max_hr,avg_hr').eq('date',dayPrev).order('measured_at').limit(5000),
+    db.from('step_readings').select('measured_at,value').eq('date',dayPrev).order('measured_at').limit(5000),
   ]);
 
-  // prev=true → tarde-noche del día X-1 (va PRIMERO en la noche, antes de medianoche)
-  const mapSpo2=(rows,isPrev)=>(rows||[]).map(r=>({time:r.measured_at.substring(11,16),value:parseFloat(r.value),prev:isPrev}));
-  const mapHr=(rows,isPrev)=>(rows||[]).map(r=>({time:r.measured_at.substring(11,16),min:r.min_hr?parseFloat(r.min_hr):null,max:r.max_hr?parseFloat(r.max_hr):null,avg:r.avg_hr?parseFloat(r.avg_hr):null,prev:isPrev}));
-  const mapSteps=(rows,isPrev)=>(rows||[]).map(r=>({time:r.measured_at.substring(11,16),value:parseFloat(r.value),prev:isPrev})).filter(s=>s.value>0);
+  // Convertir cada lectura a hora LOCAL de Madrid (Supabase guarda en UTC)
+  const mapSpo2=(rows,isPrev)=>(rows||[]).map(r=>({time:localTime(r.measured_at),fecha:localDate(r.measured_at),value:parseFloat(r.value),prev:isPrev}));
+  const mapHr=(rows,isPrev)=>(rows||[]).map(r=>({time:localTime(r.measured_at),fecha:localDate(r.measured_at),measured_at:r.measured_at,min:r.min_hr?parseFloat(r.min_hr):null,max:r.max_hr?parseFloat(r.max_hr):null,avg:r.avg_hr?parseFloat(r.avg_hr):null,prev:isPrev}));
+  const mapSteps=(rows,isPrev)=>(rows||[]).map(r=>({time:localTime(r.measured_at),fecha:localDate(r.measured_at),value:parseFloat(r.value),prev:isPrev})).filter(s=>s.value>0);
 
-  // La FC 24h del día X = exactamente las lecturas de FC del día X (madrugada + resto del día)
-  const hrDayX=mapHr(hrMorningRes.data,false);
+  // FC 24h del día X = lecturas cuya FECHA LOCAL es exactamente el día X.
+  // Combinamos ambas consultas (dayX y dayPrev) y filtramos por fecha local,
+  // porque por el desfase UTC algunas lecturas del día X pueden venir en cualquiera de las dos.
+  const todasHr=[...mapHr(hrPrevRes.data,true),...mapHr(hrMorningRes.data,false)];
+  const hrDayX=todasHr.filter(p=>p.fecha===dayX).sort((a,b)=>a.measured_at.localeCompare(b.measured_at));
 
   dayDetail[date]={
+    fechaSolicitada:dayX,
     // Noche unida: tarde-noche del día X-1 (prev) + madrugada del día X
     spo2:[...mapSpo2(spo2PrevRes.data,true),...mapSpo2(spo2MorningRes.data,false)],
     hr:[...mapHr(hrPrevRes.data,true),...mapHr(hrMorningRes.data,false)],
@@ -748,8 +767,8 @@ function showSpo2Modal(){
   const{spo2}=dayDetail[selectedDate];
   const s=summaries[selectedDate];
   const sleep=s?.sleep;
-  const sleepStart=sleep?.sleep_start?.substring(11,16);
-  const sleepEnd=sleep?.sleep_end?.substring(11,16);
+  const sleepStart=(sleep?.sleep_start?localTime(sleep.sleep_start):undefined);
+  const sleepEnd=(sleep?.sleep_end?localTime(sleep.sleep_end):undefined);
   const spo2Sleep=filterNight(spo2,sleepStart,sleepEnd);
   const pd=prevDate(selectedDate);
 
@@ -846,7 +865,7 @@ async function renderDay(){
   const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
   const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
   document.getElementById('valSleep').textContent=fmtH(sleep?.total_sleep);
-  document.getElementById('subSleep').textContent=sleep?.sleep_start&&sleep?.sleep_end?sleep.sleep_start.substring(11,16)+' – '+sleep.sleep_end.substring(11,16):'–';
+  document.getElementById('subSleep').textContent=sleep?.sleep_start&&sleep?.sleep_end?localTime(sleep.sleep_start)+' – '+localTime(sleep.sleep_end):'–';
   document.getElementById('valEfficiency').textContent=eff!=null?eff+'%':'–';
   document.getElementById('valEfficiency').style.color=eff!=null?(eff>=85?'var(--good)':eff>=75?'#C98B0A':'#D94040'):'var(--muted)';
   document.getElementById('subEfficiency').textContent=eff!=null?(eff>=85?'Buena':eff>=75?'Mejorable':'Baja'):'–';
@@ -862,8 +881,8 @@ async function renderDay(){
   document.getElementById('valBreathing').style.color=bd>15?'#D94040':bd>10?'#C98B0A':'var(--text)';
 
   // Panel dual
-  const sleepStart=sleep?.sleep_start?.substring(11,16);
-  const sleepEnd=sleep?.sleep_end?.substring(11,16);
+  const sleepStart=(sleep?.sleep_start?localTime(sleep.sleep_start):undefined);
+  const sleepEnd=(sleep?.sleep_end?localTime(sleep.sleep_end):undefined);
   document.getElementById('dualTitle').textContent=`SpO2 y FC — Noche del ${fmtDateShort(pd)} al ${fmtDateShort(selectedDate)}`;
   if(s.parcial){
     document.getElementById('dualSleepLabel').textContent='⏳ Noche pendiente: los datos del sueño se completarán cuando llegue la madrugada del día siguiente. La FC del día sí está disponible abajo.';
@@ -1269,7 +1288,14 @@ function showHR24Modal(){
   const maxV=avgs.length?Math.round(Math.max(...avgs)):null;
   const primera=hrSorted[0].time, ultima=hrSorted[hrSorted.length-1].time;
 
-  document.getElementById('hr24ModalSubtitle').textContent=`${hrSorted.length} lecturas · de ${primera} a ${ultima}`;
+  // Diagnóstico: qué días aparecen realmente en los datos
+  const diasPresentes=[...new Set(hrSorted.map(p=>p.fecha))].sort();
+  const diaSolicitado=selectedDate;
+  const coincide=diasPresentes.length===1&&diasPresentes[0]===diaSolicitado;
+  const avisoFecha=coincide?'':` ⚠ Datos de: ${diasPresentes.join(', ')} (esperado: ${diaSolicitado})`;
+
+  document.getElementById('hr24ModalSubtitle').textContent=`${hrSorted.length} lecturas · de ${primera} a ${ultima}${avisoFecha}`;
+  document.getElementById('hr24ModalSubtitle').style.color=coincide?'var(--muted)':'#D94040';
 
   document.getElementById('hr24ModalSummary').innerHTML=[
     [mean!=null?mean+' bpm':'–','var(--pink)','FC media'],
@@ -1285,8 +1311,10 @@ function showHR24Modal(){
     const avg=p.avg!=null?Math.round(p.avg):null;
     const rango=(p.min!=null&&p.max!=null)?`${Math.round(p.min)}–${Math.round(p.max)}`:'–';
     const badge=isPeak?'<span class="spo2-badge badge-bad">PICO</span>':avg!=null&&avg>100?'<span class="spo2-badge badge-warn">Alta</span>':'<span class="spo2-badge badge-good">Normal</span>';
+    // Marcar en rojo si el día de la lectura no coincide con el día solicitado
+    const diaMal=p.fecha!==diaSolicitado;
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:${isPeak?'#D94040':'var(--pink)'}">${avg!=null?avg+' bpm':'–'}</td><td style="color:var(--muted)">${rango}</td><td>${badge}</td>`;
+    tr.innerHTML=`<td style="color:${diaMal?'#D94040':'var(--muted)'};font-size:11px">${fmtDateShort(p.fecha)}</td><td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:${isPeak?'#D94040':'var(--pink)'}">${avg!=null?avg+' bpm':'–'}</td><td style="color:var(--muted)">${rango}</td><td>${badge}</td>`;
     tbody.appendChild(tr);
   });
 
@@ -1317,7 +1345,7 @@ function toggleDualView(){
 function renderCombinedChart(){
   if(!selectedDate||!dayDetail[selectedDate])return;
   const s=summaries[selectedDate],sleep=s?.sleep;
-  const ss=sleep?.sleep_start?.substring(11,16),se=sleep?.sleep_end?.substring(11,16);
+  const ss=(sleep?.sleep_start?localTime(sleep.sleep_start):undefined),se=(sleep?.sleep_end?localTime(sleep.sleep_end):undefined);
   const{spo2,hr,steps}=dayDetail[selectedDate];
   const spo2Sleep=filterNight(spo2,ss,se);
   const hrSleep=filterNight(hr,ss,se);
@@ -1403,8 +1431,8 @@ function renderCombinedChart(){
 async function refreshCharts(){
   if(!selectedDate)return;
   const s=summaries[selectedDate],sleep=s?.sleep;
-  const sleepStart=sleep?.sleep_start?.substring(11,16);
-  const sleepEnd=sleep?.sleep_end?.substring(11,16);
+  const sleepStart=(sleep?.sleep_start?localTime(sleep.sleep_start):undefined);
+  const sleepEnd=(sleep?.sleep_end?localTime(sleep.sleep_end):undefined);
   document.getElementById('spo2Wrap').innerHTML='<div class="chart-loading"><div class="mini-spin"></div>Recargando…</div>';
   document.getElementById('hrWrap').innerHTML='<div class="chart-loading"><div class="mini-spin"></div>Recargando…</div>';
   dc('spo2');dc('hr');
@@ -1457,7 +1485,7 @@ function downloadCSVFile(rows, filename){
 function downloadSleepCSV(){
   if(!selectedDate||!dayDetail[selectedDate])return;
   const s=summaries[selectedDate],sleep=s?.sleep;
-  const ss=sleep?.sleep_start?.substring(11,16),se=sleep?.sleep_end?.substring(11,16);
+  const ss=(sleep?.sleep_start?localTime(sleep.sleep_start):undefined),se=(sleep?.sleep_end?localTime(sleep.sleep_end):undefined);
   const{spo2,hr}=dayDetail[selectedDate];
   const spo2Sleep=filterNight(spo2,ss,se);
   const hrSleep=filterNight(hr,ss,se);
@@ -1519,8 +1547,8 @@ const CSV_FIELDS=[
   {key:'core',       label:'Sueño ligero (h)',         get:d=>summaries[d]?.sleep?.core?.toFixed(2)??''},
   {key:'awake',      label:'Tiempo despierto (h)',     get:d=>summaries[d]?.sleep?.awake?.toFixed(2)??''},
   {key:'efficiency', label:'Eficiencia sueño (%)',     get:d=>{const s=summaries[d]?.sleep;const ib=s?.in_bed>0?s.in_bed:((s?.total_sleep||0)+(s?.awake||0));return s?.total_sleep&&ib>0?Math.round(s.total_sleep/ib*100):'';}},
-  {key:'sleep_start',label:'Hora inicio sueño',        get:d=>summaries[d]?.sleep?.sleep_start?.substring(11,16)??''},
-  {key:'sleep_end',  label:'Hora fin sueño',           get:d=>summaries[d]?.sleep?.sleep_end?.substring(11,16)??''},
+  {key:'sleep_start',label:'Hora inicio sueño',        get:d=>summaries[d]?.(sleep?.sleep_start?localTime(sleep.sleep_start):'')},
+  {key:'sleep_end',  label:'Hora fin sueño',           get:d=>summaries[d]?.(sleep?.sleep_end?localTime(sleep.sleep_end):'')},
   {key:'rhr',        label:'FC en reposo (bpm)',       get:d=>{const v=summaries[d]?.vitals?.resting_heart_rate;return v!=null?Math.round(v):'';}},
   {key:'hrv',        label:'VFC (ms)',                 get:d=>summaries[d]?.vitals?.hrv_avg?.toFixed(1)??''},
   {key:'breathing',  label:'Perturbaciones (/h)',      get:d=>summaries[d]?.vitals?.breathing_disturbances?.toFixed(1)??''},
@@ -1662,7 +1690,7 @@ function exportCSV(){
     const tot=sleep?.total_sleep||0;
     const deepPct=tot>0&&sleep?.deep?Math.round(sleep.deep/tot*100):null;
     const remPct=tot>0&&sleep?.rem?Math.round(sleep.rem/tot*100):null;
-    return[d,prevDate(d),spo2_min??'',spo2_avg??'',ev94??'',ev90??'',sleep?.total_sleep?.toFixed(2)??'',sleep?.deep?.toFixed(2)??'',deepPct??'',sleep?.rem?.toFixed(2)??'',remPct??'',sleep?.core?.toFixed(2)??'',sleep?.awake?.toFixed(2)??'',eff??'',sleep?.sleep_start?.substring(11,16)??'',sleep?.sleep_end?.substring(11,16)??'',vitals?.resting_heart_rate!=null?Math.round(vitals.resting_heart_rate):'',vitals?.hrv_avg?.toFixed(1)??'',vitals?.breathing_disturbances?.toFixed(1)??'',vitals?.respiratory_rate_avg!=null?Math.round(vitals.respiratory_rate_avg):'',vitals?.wrist_temperature?.toFixed(1)??''];
+    return[d,prevDate(d),spo2_min??'',spo2_avg??'',ev94??'',ev90??'',sleep?.total_sleep?.toFixed(2)??'',sleep?.deep?.toFixed(2)??'',deepPct??'',sleep?.rem?.toFixed(2)??'',remPct??'',sleep?.core?.toFixed(2)??'',sleep?.awake?.toFixed(2)??'',eff??'',(sleep?.sleep_start?localTime(sleep.sleep_start):''),(sleep?.sleep_end?localTime(sleep.sleep_end):''),vitals?.resting_heart_rate!=null?Math.round(vitals.resting_heart_rate):'',vitals?.hrv_avg?.toFixed(1)??'',vitals?.breathing_disturbances?.toFixed(1)??'',vitals?.respiratory_rate_avg!=null?Math.round(vitals.respiratory_rate_avg):'',vitals?.wrist_temperature?.toFixed(1)??''];
   }).filter(Boolean);
   const csv=[headers,...rows].map(r=>r.map(v=>String(v).includes(',')?`"${v}"`:v).join(',')).join('\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
@@ -1773,7 +1801,7 @@ async function generatePDF(){
         doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(...BLACK);doc.text(`Noche del ${fmtDateMed(prevDate(d))}`,mg+5,y+4.5);
         doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);doc.text(`SpO2 mín: ${s.spo2_min}%   Caídas <94%: ${s.ev94}   Caídas <90%: ${s.ev90}`,mg+65,y+4.5);y+=13;
         if(dayDetail[d]){
-          const sl=summaries[d]?.sleep;const ss=sl?.sleep_start?.substring(11,16);const se=sl?.sleep_end?.substring(11,16);
+          const sl=summaries[d]?.sleep;const ss=(sl?.sleep_start?localTime(sl.sleep_start):undefined);const se=(sl?.sleep_end?localTime(sl.sleep_end):undefined);
           const spo2Sleep=filterNight(dayDetail[d].spo2,ss,se);
           doc.setFontSize(7.5);doc.setFont('helvetica','bold');doc.setTextColor(...GRAY2);doc.text('Hora',mg+4,y);doc.text('SpO2',mg+22,y);doc.text('Nivel',mg+38,y);y+=5;
           spo2Sleep.filter(p=>p.value<94).sort((a,b)=>a.time.localeCompare(b.time)).forEach(ev=>{
