@@ -271,7 +271,8 @@
         </div>
         <div class="dual-header-btns">
           <button class="dual-btn" id="viewToggleBtn" onclick="toggleDualView()" style="border-color:#1A9E8F55;color:#1A9E8F">⊞ Superpuestas</button>
-          <button class="dual-btn" id="spo2ModalBtn" onclick="showSpo2Modal()">📋 Ver lecturas</button>
+          <button class="dual-btn" id="spo2ModalBtn" onclick="showSpo2Modal()">📋 Ver SpO2</button>
+          <button class="dual-btn" id="hrNightModalBtn" onclick="showHrNightModal()">📋 Ver FC</button>
           <button class="dual-btn" onclick="downloadSleepCSV()">↓ CSV</button>
           <button class="dual-btn" onclick="refreshCharts()">↺ Recargar</button>
         </div>
@@ -422,6 +423,24 @@
       </table>
     </div>
     <div class="modal-footer"><button class="btn-cancel" onclick="closeHR24Modal()">Cerrar</button></div>
+  </div>
+</div>
+
+<!-- Modal FC nocturna (durante el sueño, mismo rango que SpO2) -->
+<div id="hrNightModal" class="modal-overlay hidden" onclick="if(event.target===this)closeHrNightModal()">
+  <div class="modal spo2-modal">
+    <div class="spo2-modal-header">
+      <h3 id="hrNightModalTitle">FC durante el sueño</h3>
+      <p id="hrNightModalSubtitle" style="margin-bottom:0"></p>
+    </div>
+    <div class="spo2-stats-row" id="hrNightModalSummary"></div>
+    <div class="spo2-table-wrap">
+      <table class="spo2-table">
+        <thead><tr><th>Día</th><th>Hora</th><th>FC media</th><th>Mín–Máx</th></tr></thead>
+        <tbody id="hrNightTableBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-footer"><button class="btn-cancel" onclick="closeHrNightModal()">Cerrar</button></div>
   </div>
 </div>
 
@@ -626,6 +645,23 @@ function clipToReference(arr,refArr){
   const keys=refArr.map(tsKey);
   const minK=Math.min(...keys), maxK=Math.max(...keys);
   return (arr||[]).filter(p=>{const k=tsKey(p);return k>=minK&&k<=maxK;});
+}
+// Construye el eje X acotado EXACTAMENTE al rango del SpO2:
+// desde la primera hasta la última lectura de SpO2. Incluye las horas de las
+// demás series (ej. FC) que caigan dentro de ese rango, y ordena cronológicamente.
+function axisBoundedBySpo2(spo2Arr,...otherSeries){
+  if(!spo2Arr||!spo2Arr.length)return [];
+  const spo2Keys=spo2Arr.map(tsKey);
+  const minK=Math.min(...spo2Keys), maxK=Math.max(...spo2Keys);
+  const map={}; // time -> sortKey
+  // Siempre incluir todas las horas del SpO2
+  spo2Arr.forEach(p=>{ if(!(p.time in map))map[p.time]=nightSortKey(p); });
+  // Incluir horas de las demás series solo si caen dentro del rango del SpO2
+  otherSeries.forEach(arr=>(arr||[]).forEach(p=>{
+    const k=tsKey(p);
+    if(k>=minK&&k<=maxK&&!(p.time in map))map[p.time]=nightSortKey(p);
+  }));
+  return Object.keys(map).sort((a,b)=>map[a]-map[b]);
 }
 
 // ── Métricas clínicas ─────────────────────────────────────────────────────
@@ -896,6 +932,58 @@ function showSpo2Modal(){
 }
 function closeSpo2Modal(){dc('spo2Histo');document.getElementById('spo2Modal').classList.add('hidden');}
 
+// ── Modal: FC durante el sueño (mismo rango que SpO2) ─────────────────────
+function showHrNightModal(){
+  if(!selectedDate||!dayDetail[selectedDate])return;
+  const{spo2,hr}=dayDetail[selectedDate];
+  const s=summaries[selectedDate];
+  const sleep=s?.sleep;
+  const sleepStart=(sleep?.sleep_start?localTime(sleep.sleep_start):undefined);
+  const sleepEnd=(sleep?.sleep_end?localTime(sleep.sleep_end):undefined);
+  const spo2Sleep=filterNight(spo2,sleepStart,sleepEnd);
+  const hrSleep=filterNight(hr,sleepStart,sleepEnd);
+  // FC recortada exactamente al rango del SpO2 (igual que en la gráfica)
+  const hrClipped=clipToReference(hrSleep,spo2Sleep);
+  const hrSorted=[...hrClipped].sort((a,b)=>tsKey(a)-tsKey(b));
+
+  document.getElementById('hrNightModalTitle').textContent=`FC durante el sueño — Noche del ${fmtDateShort(prevDate(selectedDate))} al ${fmtDateShort(selectedDate)}`;
+
+  if(!hrSorted.length){
+    document.getElementById('hrNightModalSubtitle').textContent='Sin datos de FC en la franja del SpO2.';
+    document.getElementById('hrNightModalSummary').innerHTML='';
+    document.getElementById('hrNightTableBody').innerHTML='';
+    document.getElementById('hrNightModal').classList.remove('hidden');
+    return;
+  }
+
+  const dias=[...new Set(hrSorted.map(p=>p.fecha))].sort();
+  const primera=hrSorted[0].time, ultima=hrSorted[hrSorted.length-1].time;
+  const avgs=hrSorted.map(p=>p.avg).filter(v=>v!=null);
+  const mean=avgs.length?Math.round(avgs.reduce((a,b)=>a+b,0)/avgs.length):null;
+  const minV=avgs.length?Math.round(Math.min(...avgs)):null;
+  const maxV=avgs.length?Math.round(Math.max(...avgs)):null;
+
+  document.getElementById('hrNightModalSubtitle').textContent=`${hrSorted.length} lecturas · de ${primera} a ${ultima} · día(s): ${dias.join(', ')}`;
+
+  document.getElementById('hrNightModalSummary').innerHTML=[
+    [mean!=null?mean+' bpm':'–','var(--pink)','FC media'],
+    [minV!=null?minV+' bpm':'–','#1D9E75','Mínima'],
+    [maxV!=null?maxV+' bpm':'–',maxV>100?'#D94040':'var(--text)','Máxima'],
+  ].map(([v,c,l])=>`<div class="spo2-stat"><div class="spo2-stat-val" style="color:${c}">${v}</div><div class="spo2-stat-lbl">${l}</div></div>`).join('');
+
+  const tbody=document.getElementById('hrNightTableBody');tbody.innerHTML='';
+  hrSorted.forEach(p=>{
+    const avg=p.avg!=null?Math.round(p.avg):null;
+    const rango=(p.min!=null&&p.max!=null)?`${Math.round(p.min)}–${Math.round(p.max)}`:'–';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="color:var(--muted);font-size:11px">${p.fecha?fmtDateShort(p.fecha):'–'}</td><td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:var(--pink)">${avg!=null?avg+' bpm':'–'}</td><td style="color:var(--muted)">${rango}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('hrNightModal').classList.remove('hidden');
+}
+function closeHrNightModal(){document.getElementById('hrNightModal').classList.add('hidden');}
+
 // ── Renderiza el día ──────────────────────────────────────────────────────
 async function renderDay(){
   const s=summaries[selectedDate];if(!s)return;
@@ -1011,10 +1099,10 @@ async function renderDay(){
 
   // SpO2 chart
   if(!s.parcial){
-  // El EJE lo define SOLO el SpO2 (que solo mide de noche). La FC se recorta
-  // exactamente a ese mismo rango horario.
+  // El EJE X va EXACTAMENTE desde la primera hasta la última lectura de SpO2.
+  // La FC se recorta a ese mismo rango y usa el mismo eje.
   const hrClipped=clipToReference(hrSleep,spo2Sleep);
-  const ejeNoche=commonNightAxis(spo2Sleep,hrClipped);
+  const ejeNoche=axisBoundedBySpo2(spo2Sleep,hrClipped);
   const spo2Aligned=alignToAxis(ejeNoche,spo2Sleep,'value');
 
   document.getElementById('spo2Wrap').innerHTML='<canvas id="spo2Chart"></canvas>';
@@ -1532,7 +1620,7 @@ async function refreshCharts(){
 
   document.getElementById('spo2Wrap').innerHTML='<canvas id="spo2Chart"></canvas>';
   const hrClipped=clipToReference(hrSleep,spo2Sleep);
-  const ejeNoche=commonNightAxis(spo2Sleep,hrClipped);
+  const ejeNoche=axisBoundedBySpo2(spo2Sleep,hrClipped);
   const spo2Aligned=alignToAxis(ejeNoche,spo2Sleep,'value');
   charts.spo2=new Chart(document.getElementById('spo2Chart'),{type:'line',data:{labels:ejeNoche,datasets:[{label:'SpO2',data:spo2Aligned,borderColor:'#1D9E75',borderWidth:2,pointBackgroundColor:spo2Aligned.map(v=>sc(v)),pointRadius:spo2Aligned.map(v=>v==null?0:v<90?5:v<94?4:3),tension:0.3,spanGaps:true,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb1',ejeNoche,stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]});
   document.getElementById('hrWrap').innerHTML='<canvas id="hrChart"></canvas>';
