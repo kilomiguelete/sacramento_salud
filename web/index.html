@@ -399,7 +399,7 @@
     <div class="spo2-histo"><canvas id="spo2HistoChart"></canvas></div>
     <div class="spo2-table-wrap">
       <table class="spo2-table">
-        <thead><tr><th>Hora</th><th>SpO2</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Día</th><th>Hora</th><th>SpO2</th><th>Estado</th></tr></thead>
         <tbody id="spo2TableBody"></tbody>
       </table>
     </div>
@@ -827,7 +827,12 @@ function showSpo2Modal(){
   const pd=prevDate(selectedDate);
 
   document.getElementById('spo2ModalTitle').textContent=`Lecturas SpO2 — Noche del ${fmtDateShort(prevDate(selectedDate))} al ${fmtDateShort(selectedDate)}`;
-  document.getElementById('spo2ModalSubtitle').textContent=`${spo2Sleep.length} lecturas durante la noche (unidas de ambos días)`;
+  // Diagnóstico: días y rango horario presentes
+  const diasSpo2=[...new Set(spo2Sleep.map(p=>p.fecha))].sort();
+  const horasSpo2=spo2Sleep.map(p=>p.time).sort();
+  const primeraSpo2=horasSpo2.length?horasSpo2[0]:'–';
+  const ultimaSpo2=horasSpo2.length?horasSpo2[horasSpo2.length-1]:'–';
+  document.getElementById('spo2ModalSubtitle').textContent=`${spo2Sleep.length} lecturas · de ${primeraSpo2} a ${ultimaSpo2} · día(s): ${diasSpo2.join(', ')}`;
 
   const vals=spo2Sleep.map(p=>p.value);
   const minV=vals.length?Math.min(...vals):null;
@@ -884,7 +889,7 @@ function showSpo2Modal(){
     const cls=isCrit?'badge-bad':isWarn?'badge-warn':'badge-good';
     const lbl=isCrit?'CRÍTICO':isWarn?'Bajo':'Normal';
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:${sc(p.value)}">${p.value}%</td><td><span class="spo2-badge ${cls}">${lbl}</span></td>`;
+    tr.innerHTML=`<td style="color:var(--muted);font-size:11px">${p.fecha?fmtDateShort(p.fecha):'–'}</td><td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:${sc(p.value)}">${p.value}%</td><td><span class="spo2-badge ${cls}">${lbl}</span></td>`;
     tbody.appendChild(tr);
   });
   document.getElementById('spo2Modal').classList.remove('hidden');
