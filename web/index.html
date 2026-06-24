@@ -579,63 +579,87 @@ const rlPlugin=(id,vals)=>({id,afterDraw(ch){
   vals.forEach(([v,c])=>{const yp=y.getPixelForValue(v);ctx.save();ctx.strokeStyle=c;ctx.lineWidth=1;ctx.setLineDash([5,4]);ctx.globalAlpha=.8;ctx.beginPath();ctx.moveTo(left,yp);ctx.lineTo(right,yp);ctx.stroke();ctx.restore();});
 }});
 // Bandas verticales que marcan momentos con pasos (levantadas nocturnas)
-// Dibuja una línea vertical naranja por cada momento con pasos, aunque sean pocos.
-// Al pasar el ratón cerca, muestra un tooltip con la hora y el número de pasos.
-// 'steps' es un array [{time, value, ...}] y 'labels' es el eje X (horas "HH:MM").
+// Marca los momentos con pasos. Las líneas se dibujan DETRÁS de los datos,
+// con transparencia, y las que quedan muy juntas se agrupan en una sola más
+// gruesa (sumando sus pasos). Al pasar el ratón se ve la hora y el nº de pasos.
 const stepBandsPlugin=(id,labels,steps)=>({
   id,
-  afterDraw(ch){
-    if(!steps||!steps.length)return;
-    const{ctx,chartArea:{top,bottom},scales:{x}}=ch;
-    // Mapa hora->pasos (sumando si hay varias lecturas en la misma hora visible)
+  // Calcula las posiciones y las agrupa. Se llama antes de pintar los datos.
+  _computeMarks(ch){
+    if(!steps||!steps.length){ch._stepMarks=[];return;}
+    const{scales:{x}}=ch;
     const stepMap={};
     steps.forEach(s=>{ stepMap[s.time]=(stepMap[s.time]||0)+s.value; });
-    // Posición X de cada hora con pasos. Si la hora exacta no está en el eje,
-    // se ubica en la etiqueta más cercana cronológicamente.
-    const positions=[];
+    // Posición X de cada hora con pasos
+    let raw=[];
     Object.keys(stepMap).forEach(t=>{
       let idx=labels.indexOf(t);
       if(idx<0){
-        // buscar la etiqueta más cercana por comparación de texto "HH:MM"
         let best=-1,bestDiff=Infinity;
-        labels.forEach((lbl,i)=>{
-          const diff=Math.abs(toMin(lbl)-toMin(t));
-          if(diff<bestDiff){bestDiff=diff;best=i;}
-        });
+        labels.forEach((lbl,i)=>{const diff=Math.abs(toMin(lbl)-toMin(t));if(diff<bestDiff){bestDiff=diff;best=i;}});
         idx=best;
       }
-      if(idx>=0)positions.push({x:x.getPixelForValue(idx),time:t,value:Math.round(stepMap[t])});
+      if(idx>=0)raw.push({x:x.getPixelForValue(idx),time:t,value:Math.round(stepMap[t])});
     });
-    ch._stepMarks=positions; // guardar para el hover
-    ctx.save();
-    positions.forEach(p=>{
-      ctx.strokeStyle='rgba(230,150,30,0.85)';
-      ctx.lineWidth=2;
-      ctx.beginPath();ctx.moveTo(p.x,top);ctx.lineTo(p.x,bottom);ctx.stroke();
-      // pequeño punto naranja arriba para que sea más visible
-      ctx.fillStyle='#E69620';
-      ctx.beginPath();ctx.arc(p.x,top+4,3,0,Math.PI*2);ctx.fill();
-    });
-    // Tooltip si el ratón está cerca de una línea
-    const m=ch._stepHover;
-    if(m){
-      let near=null,nd=14;
-      positions.forEach(p=>{const d=Math.abs(p.x-m.x);if(d<nd){nd=d;near=p;}});
-      if(near){
-        const txt=`${near.time} · ${near.value} pasos`;
-        ctx.font='600 12px system-ui';
-        const tw=ctx.measureText(txt).width;
-        const bx=Math.min(Math.max(near.x-tw/2-8,2),ch.width-tw-18),by=top+14;
-        ctx.fillStyle='rgba(20,28,40,0.95)';
-        ctx.strokeStyle='#E69620';ctx.lineWidth=1;
-        ctx.beginPath();
-        if(ctx.roundRect)ctx.roundRect(bx,by,tw+16,26,6);
-        else ctx.rect(bx,by,tw+16,26);
-        ctx.fill();ctx.stroke();
-        ctx.fillStyle='#E69620';ctx.textBaseline='middle';ctx.textAlign='left';
-        ctx.fillText(txt,bx+8,by+13);
+    raw.sort((a,b)=>a.x-b.x);
+    // Agrupar líneas cuya X esté a <=8px: se combinan en una sola, sumando pasos
+    const MERGE_PX=8;
+    const groups=[];
+    raw.forEach(p=>{
+      const last=groups[groups.length-1];
+      if(last&&p.x-last.xEnd<=MERGE_PX){
+        last.xEnd=p.x; last.value+=p.value; last.count++;
+        last.times.push(p.time);
+        last.x=(last.xStart+last.xEnd)/2; // centro del grupo
+      }else{
+        groups.push({xStart:p.x,xEnd:p.x,x:p.x,value:p.value,count:1,times:[p.time]});
       }
-    }
+    });
+    ch._stepMarks=groups;
+  },
+  beforeDatasetsDraw(ch){
+    this._computeMarks(ch);
+    const{ctx,chartArea:{top,bottom}}=ch;
+    const groups=ch._stepMarks||[];
+    ctx.save();
+    groups.forEach(g=>{
+      // Más gruesa y algo más opaca cuanto más movimiento agrupa
+      const w=Math.min(2+(g.count-1)*1.5,8);
+      ctx.strokeStyle='rgba(230,150,30,0.30)'; // transparente, detrás de los datos
+      ctx.lineWidth=w;
+      ctx.beginPath();ctx.moveTo(g.x,top);ctx.lineTo(g.x,bottom);ctx.stroke();
+    });
+    ctx.restore();
+  },
+  afterDraw(ch){
+    // Solo el tooltip va encima de los datos
+    const groups=ch._stepMarks||[];
+    if(!groups.length)return;
+    const{ctx,chartArea:{top}}=ch;
+    const m=ch._stepHover;
+    if(!m)return;
+    let near=null,nd=14;
+    groups.forEach(g=>{const d=Math.abs(g.x-m.x);if(d<nd){nd=d;near=g;}});
+    if(!near)return;
+    ctx.save();
+    // Resaltar la línea activa
+    ctx.strokeStyle='rgba(230,150,30,0.9)';ctx.lineWidth=Math.min(2+(near.count-1)*1.5,8);
+    ctx.beginPath();ctx.moveTo(near.x,top);ctx.lineTo(near.x,ch.chartArea.bottom);ctx.stroke();
+    // Texto: si es un grupo, mostrar rango de horas y total
+    const txt=near.count>1
+      ? `${near.times[0]}–${near.times[near.times.length-1]} · ${near.value} pasos`
+      : `${near.times[0]} · ${near.value} pasos`;
+    ctx.font='600 12px system-ui';
+    const tw=ctx.measureText(txt).width;
+    const bx=Math.min(Math.max(near.x-tw/2-8,2),ch.width-tw-18),by=top+14;
+    ctx.fillStyle='rgba(20,28,40,0.97)';
+    ctx.strokeStyle='#E69620';ctx.lineWidth=1;
+    ctx.beginPath();
+    if(ctx.roundRect)ctx.roundRect(bx,by,tw+16,26,6);
+    else ctx.rect(bx,by,tw+16,26);
+    ctx.fill();ctx.stroke();
+    ctx.fillStyle='#E69620';ctx.textBaseline='middle';ctx.textAlign='left';
+    ctx.fillText(txt,bx+8,by+13);
     ctx.restore();
   },
   afterEvent(ch,args){
