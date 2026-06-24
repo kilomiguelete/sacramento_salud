@@ -334,6 +334,7 @@
         <div class="legend-item"><span class="legend-line" style="background:#C25880"></span>FC media</div>
         <div class="legend-item"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#D94040"></span>Pico atípico (&gt;media+2σ y &gt;100 bpm)</div>
         <div class="legend-item"><span class="legend-line" style="background:#6B8BAD;border-top:1px dashed #6B8BAD;height:0"></span>Media del día</div>
+        <div class="legend-item"><span style="display:inline-block;width:12px;height:12px;background:rgba(230,150,30,0.45);border-radius:2px"></span>Movimiento/pasos</div>
       </div>
       <div style="height:200px;position:relative" id="hr24Wrap">
         <div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>
@@ -569,13 +570,29 @@ function nightSortKey(p){
   return p.prev?mins:mins+1440;
 }
 // Filtra y ORDENA las lecturas de la noche cruzando medianoche.
+// Usa la hora local y el flag prev para decidir si cada lectura cae en la
+// ventana de sueño (que cruza medianoche: ej. 23:08 → 07:59).
 function filterNight(arr,start,end){
+  if(!start||!end)return [...(arr||[])].sort((a,b)=>nightSortKey(a)-nightSortKey(b));
+  const cruzaMedianoche=start>end; // ej 23:08 > 07:59
   const inWin=(arr||[]).filter(p=>{
-    if(!start||!end)return true;
-    // prev = tarde-noche (antes de medianoche): hora local >= acostarse
-    if(p.prev)return p.time>=start;
-    // madrugada (después de medianoche): hora local <= despertar
-    return p.time<=end;
+    const t=p.time;
+    if(cruzaMedianoche){
+      // La ventana va de 'start' (noche) a medianoche, y de medianoche a 'end' (mañana)
+      if(p.prev){
+        // Lectura de la tarde-noche (día anterior): entre start y 23:59.
+        // Excluye explícitamente las horas diurnas del día anterior.
+        return t>=start;
+      }else{
+        // Lectura del día X: válida solo si es de madrugada (<=end).
+        // Excluye explícitamente las horas diurnas (>end y <start).
+        return t<=end;
+      }
+    }else{
+      // Ventana sin cruce de medianoche (ej. 01:30 → 09:00): rango directo.
+      // Solo cuentan lecturas del día X (madrugada/mañana), no del día anterior.
+      return !p.prev&&t>=start&&t<=end;
+    }
   });
   return inWin.sort((a,b)=>nightSortKey(a)-nightSortKey(b));
 }
@@ -697,6 +714,10 @@ async function loadDayDetail(date,force=false){
   const todasHr=[...mapHr(hrPrevRes.data,true),...mapHr(hrMorningRes.data,false)];
   const hrDayX=todasHr.filter(p=>p.fecha===dayX).sort((a,b)=>a.measured_at.localeCompare(b.measured_at));
 
+  // Pasos del día natural X completo (para superponer en la FC 24h)
+  const todosSteps=[...mapSteps(stepsPrevRes.data,true),...mapSteps(stepsMorningRes.data,false)];
+  const stepsDayX=todosSteps.filter(p=>p.fecha===dayX);
+
   dayDetail[date]={
     fechaSolicitada:dayX,
     // Noche unida: tarde-noche del día X-1 (prev) + madrugada del día X
@@ -705,6 +726,8 @@ async function loadDayDetail(date,force=false){
     steps:[...mapSteps(stepsPrevRes.data,true),...mapSteps(stepsMorningRes.data,false)],
     // FC del día natural X completo (gráfica 24h)
     hrDayX:hrDayX,
+    // Pasos del día natural X completo
+    stepsDayX:stepsDayX,
   };
 }
 
@@ -1206,6 +1229,7 @@ async function renderHR24(){
 
   document.getElementById('hr24Wrap').innerHTML='<canvas id="hr24Chart"></canvas>';
   const peakTimes=new Set(peaks.map(p=>p.time));
+  const stepsDayX=dayDetail[selectedDate].stepsDayX||[];
 
   charts.hr24=new Chart(document.getElementById('hr24Chart'),{
     type:'line',
@@ -1234,7 +1258,7 @@ async function renderHR24(){
         y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}},
       }
     },
-    plugins:[{id:'hrMeanLine',afterDraw(ch){
+    plugins:[stepBandsPlugin('sbHr24',hrSorted.map(p=>p.time),stepsDayX),{id:'hrMeanLine',afterDraw(ch){
       const{ctx,chartArea:{left,right},scales:{y}}=ch;
       [[mean,'#6B8BAD','media'],[statThreshold,'#D94040','umbral']].forEach(([val,col])=>{
         const yp=y.getPixelForValue(val);
