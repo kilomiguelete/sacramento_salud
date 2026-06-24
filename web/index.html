@@ -273,6 +273,7 @@
           <button class="dual-btn" id="viewToggleBtn" onclick="toggleDualView()" style="border-color:#1A9E8F55;color:#1A9E8F">⊞ Superpuestas</button>
           <button class="dual-btn" id="spo2ModalBtn" onclick="showSpo2Modal()">📋 Ver SpO2</button>
           <button class="dual-btn" id="hrNightModalBtn" onclick="showHrNightModal()">📋 Ver FC</button>
+          <button class="dual-btn" id="stepsNightModalBtn" onclick="showStepsNightModal()">📋 Ver pasos</button>
           <button class="dual-btn" onclick="downloadSleepCSV()">↓ CSV</button>
           <button class="dual-btn" onclick="refreshCharts()">↺ Recargar</button>
         </div>
@@ -329,7 +330,7 @@
           <div class="panel-title" id="hr24Title" style="margin-bottom:3px">Frecuencia cardíaca — 24 horas</div>
           <div style="font-size:11px;color:var(--muted)" id="hr24Sub">Picos atípicos marcados en rojo</div>
         </div>
-        <div style="display:flex;gap:6px"><button class="dual-btn" onclick="showHR24Modal()">📋 Ver datos</button><button class="dual-btn" onclick="downloadHR24CSV()">↓ CSV</button><button class="dual-btn" onclick="refreshHR24()">↺ Recargar</button></div>
+        <div style="display:flex;gap:6px"><button class="dual-btn" onclick="showHR24Modal()">📋 Ver datos</button><button class="dual-btn" onclick="showSteps24Modal()">📋 Ver pasos</button><button class="dual-btn" onclick="downloadHR24CSV()">↓ CSV</button><button class="dual-btn" onclick="refreshHR24()">↺ Recargar</button></div>
       </div>
       <div class="legend" style="margin-top:0;margin-bottom:10px">
         <div class="legend-item"><span class="legend-line" style="background:#C25880"></span>FC media</div>
@@ -441,6 +442,24 @@
       </table>
     </div>
     <div class="modal-footer"><button class="btn-cancel" onclick="closeHrNightModal()">Cerrar</button></div>
+  </div>
+</div>
+
+<!-- Modal de PASOS (nocturno o diurno) -->
+<div id="stepsModal" class="modal-overlay hidden" onclick="if(event.target===this)closeStepsModal()">
+  <div class="modal spo2-modal">
+    <div class="spo2-modal-header">
+      <h3 id="stepsModalTitle">Pasos</h3>
+      <p id="stepsModalSubtitle" style="margin-bottom:0"></p>
+    </div>
+    <div class="spo2-stats-row" id="stepsModalSummary"></div>
+    <div class="spo2-table-wrap">
+      <table class="spo2-table">
+        <thead><tr><th>Día</th><th>Hora</th><th>Pasos</th></tr></thead>
+        <tbody id="stepsTableBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-footer"><button class="btn-cancel" onclick="closeStepsModal()">Cerrar</button></div>
   </div>
 </div>
 
@@ -986,6 +1005,67 @@ function showHrNightModal(){
   document.getElementById('hrNightModal').classList.remove('hidden');
 }
 function closeHrNightModal(){document.getElementById('hrNightModal').classList.add('hidden');}
+
+// ── Modal de PASOS (compartido nocturno/diurno) ───────────────────────────
+// Renderiza la tabla de pasos a partir de un array [{time,fecha,value}] ya filtrado.
+function renderStepsModal(titulo,stepsArr){
+  const stepsSorted=[...(stepsArr||[])].sort((a,b)=>tsKey(a)-tsKey(b));
+  document.getElementById('stepsModalTitle').textContent=titulo;
+
+  if(!stepsSorted.length){
+    document.getElementById('stepsModalSubtitle').textContent='Sin pasos registrados en este periodo.';
+    document.getElementById('stepsModalSummary').innerHTML='';
+    document.getElementById('stepsTableBody').innerHTML='';
+    document.getElementById('stepsModal').classList.remove('hidden');
+    return;
+  }
+
+  const dias=[...new Set(stepsSorted.map(p=>p.fecha))].sort();
+  const primera=stepsSorted[0].time, ultima=stepsSorted[stepsSorted.length-1].time;
+  const total=Math.round(stepsSorted.reduce((a,b)=>a+b.value,0));
+  const momentos=stepsSorted.length;
+  const maxPaso=Math.round(Math.max(...stepsSorted.map(p=>p.value)));
+
+  document.getElementById('stepsModalSubtitle').textContent=`${momentos} momentos con movimiento · de ${primera} a ${ultima} · día(s): ${dias.join(', ')}`;
+
+  document.getElementById('stepsModalSummary').innerHTML=[
+    [total,'#E69620','Pasos totales'],
+    [momentos,'var(--text)','Momentos'],
+    [maxPaso,'#E69620','Máx. en un momento'],
+  ].map(([v,c,l])=>`<div class="spo2-stat"><div class="spo2-stat-val" style="color:${c}">${v}</div><div class="spo2-stat-lbl">${l}</div></div>`).join('');
+
+  const tbody=document.getElementById('stepsTableBody');tbody.innerHTML='';
+  stepsSorted.forEach(p=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="color:var(--muted);font-size:11px">${p.fecha?fmtDateShort(p.fecha):'–'}</td><td style="color:var(--muted)">${p.time}</td><td style="font-weight:600;color:#E69620">${Math.round(p.value)}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('stepsModal').classList.remove('hidden');
+}
+function closeStepsModal(){document.getElementById('stepsModal').classList.add('hidden');}
+
+// Pasos durante el sueño (mismo rango que el SpO2 nocturno)
+function showStepsNightModal(){
+  if(!selectedDate||!dayDetail[selectedDate])return;
+  const{spo2,steps}=dayDetail[selectedDate];
+  const s=summaries[selectedDate];
+  const sleep=s?.sleep;
+  const sleepStart=(sleep?.sleep_start?localTime(sleep.sleep_start):undefined);
+  const sleepEnd=(sleep?.sleep_end?localTime(sleep.sleep_end):undefined);
+  const spo2Sleep=filterNight(spo2,sleepStart,sleepEnd);
+  const stepsSleep=filterNight(steps||[],sleepStart,sleepEnd);
+  // Recortar al mismo rango que el SpO2 nocturno
+  const stepsClipped=spo2Sleep.length?clipToReference(stepsSleep,spo2Sleep):stepsSleep;
+  renderStepsModal(`Pasos durante el sueño — Noche del ${fmtDateShort(prevDate(selectedDate))} al ${fmtDateShort(selectedDate)}`,stepsClipped);
+}
+
+// Pasos del día completo (mismo rango que la FC 24h)
+function showSteps24Modal(){
+  if(!selectedDate||!dayDetail[selectedDate])return;
+  const stepsDayX=dayDetail[selectedDate].stepsDayX||[];
+  renderStepsModal(`Pasos del día — ${fmtDateLong(selectedDate)}`,stepsDayX);
+}
 
 // ── Renderiza el día ──────────────────────────────────────────────────────
 async function renderDay(){
