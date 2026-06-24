@@ -570,29 +570,27 @@ function nightSortKey(p){
   return p.prev?mins:mins+1440;
 }
 // Filtra y ORDENA las lecturas de la noche cruzando medianoche.
-// Usa la hora local y el flag prev para decidir si cada lectura cae en la
-// ventana de sueño (que cruza medianoche: ej. 23:08 → 07:59).
+// Usa la hora local de cada lectura para decidir si cae en la ventana de
+// sueño (que normalmente cruza medianoche: ej. 23:30 → 10:00).
 function filterNight(arr,start,end){
-  // Si no hay datos de sueño, usar una ventana nocturna por defecto (22:00 → 10:00)
-  // en vez de mostrar el día entero.
-  if(!start||!end){start='22:00';end='10:00';}
-  const cruzaMedianoche=start>end; // ej 23:08 > 07:59
+  // Si no hay datos de sueño, usar ventana por defecto: 23:30 → 10:00
+  // (la persona nunca se acuesta antes de las 23:30).
+  if(!start||!end){start='23:30';end='10:00';}
+  const cruzaMedianoche=start>end; // ej 23:30 > 10:00
   const inWin=(arr||[]).filter(p=>{
-    const t=p.time;
+    const t=p.time; // hora local "HH:MM"
     if(cruzaMedianoche){
-      // La ventana va de 'start' (noche) a medianoche, y de medianoche a 'end' (mañana)
       if(p.prev){
-        // Lectura de la tarde-noche (día anterior): entre start y 23:59.
-        // Excluye explícitamente las horas diurnas del día anterior.
+        // Día anterior (tarde-noche): solo cuenta la franja de noche (>=start, ej >=23:30).
+        // Esto excluye su mañana/tarde, que pertenecen a otra noche.
         return t>=start;
       }else{
-        // Lectura del día X: válida solo si es de madrugada (<=end).
-        // Excluye explícitamente las horas diurnas (>end y <start).
+        // Día X: solo cuenta la madrugada/mañana (<=end, ej <=10:00).
+        // Excluye la tarde-noche del día X (que es la noche SIGUIENTE).
         return t<=end;
       }
     }else{
-      // Ventana sin cruce de medianoche (ej. 01:30 → 09:00): rango directo.
-      // Solo cuentan lecturas del día X (madrugada/mañana), no del día anterior.
+      // Ventana sin cruce (ej. 01:30 → 09:00): rango directo, solo día X
       return !p.prev&&t>=start&&t<=end;
     }
   });
@@ -928,7 +926,7 @@ async function renderDay(){
   if(s.parcial){
     document.getElementById('dualSleepLabel').textContent='⏳ Noche pendiente: los datos del sueño se completarán cuando llegue la madrugada del día siguiente. La FC del día sí está disponible abajo.';
   }else{
-    document.getElementById('dualSleepLabel').textContent=sleepStart&&sleepEnd?`Ventana de sueño: ${sleepStart} – ${sleepEnd}`:'⚠ Sin datos de sueño esta noche · mostrando franja nocturna estimada (22:00–10:00)';
+    document.getElementById('dualSleepLabel').textContent=sleepStart&&sleepEnd?`Ventana de sueño: ${sleepStart} – ${sleepEnd}`:'⚠ Sin datos de sueño esta noche · mostrando franja nocturna estimada (23:30–10:00)';
   }
   // El conteo de levantadas se actualizará tras cargar el detalle
 
