@@ -291,7 +291,7 @@
           <div class="legend">
             <div class="legend-item"><span class="legend-line" style="background:var(--warn)"></span>94%</div>
             <div class="legend-item"><span class="legend-line" style="background:var(--bad)"></span>90%</div>
-            <div class="legend-item"><span style="display:inline-block;width:12px;height:12px;background:rgba(230,150,30,0.45);border-radius:2px"></span>Movimiento/pasos</div>
+            <div class="legend-item"><span style="display:inline-block;width:3px;height:12px;background:#E69620;border-radius:1px"></span>Movimiento (pasar ratón para ver pasos)</div>
           </div>
         </div>
         <div class="dual-col">
@@ -336,7 +336,7 @@
         <div class="legend-item"><span class="legend-line" style="background:#C25880"></span>FC media</div>
         <div class="legend-item"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#D94040"></span>Pico atípico (&gt;media+2σ y &gt;100 bpm)</div>
         <div class="legend-item"><span class="legend-line" style="background:#6B8BAD;border-top:1px dashed #6B8BAD;height:0"></span>Media del día</div>
-        <div class="legend-item"><span style="display:inline-block;width:12px;height:12px;background:rgba(230,150,30,0.45);border-radius:2px"></span>Movimiento/pasos</div>
+        <div class="legend-item"><span style="display:inline-block;width:3px;height:12px;background:#E69620;border-radius:1px"></span>Movimiento (pasar ratón para ver pasos)</div>
       </div>
       <div style="height:200px;position:relative" id="hr24Wrap">
         <div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>
@@ -579,25 +579,73 @@ const rlPlugin=(id,vals)=>({id,afterDraw(ch){
   vals.forEach(([v,c])=>{const yp=y.getPixelForValue(v);ctx.save();ctx.strokeStyle=c;ctx.lineWidth=1;ctx.setLineDash([5,4]);ctx.globalAlpha=.8;ctx.beginPath();ctx.moveTo(left,yp);ctx.lineTo(right,yp);ctx.stroke();ctx.restore();});
 }});
 // Bandas verticales que marcan momentos con pasos (levantadas nocturnas)
-const stepBandsPlugin=(id,labels,steps)=>({id,beforeDraw(ch){
-  if(!steps||!steps.length)return;
-  const{ctx,chartArea:{top,bottom},scales:{x}}=ch;
-  const stepTimes=new Set(steps.map(s=>s.time));
-  ctx.save();
-  ctx.fillStyle='rgba(230,150,30,0.22)'; // naranja translúcido
-  labels.forEach((lbl,idx)=>{
-    if(stepTimes.has(lbl)){
-      // Ancho de la banda: medio intervalo a cada lado
-      const xc=x.getPixelForValue(idx);
-      const xPrev=idx>0?x.getPixelForValue(idx-1):xc;
-      const xNext=idx<labels.length-1?x.getPixelForValue(idx+1):xc;
-      const left=(xc+xPrev)/2;
-      const right=(xc+xNext)/2;
-      ctx.fillRect(left,top,Math.max(right-left,3),bottom-top);
+// Dibuja una línea vertical naranja por cada momento con pasos, aunque sean pocos.
+// Al pasar el ratón cerca, muestra un tooltip con la hora y el número de pasos.
+// 'steps' es un array [{time, value, ...}] y 'labels' es el eje X (horas "HH:MM").
+const stepBandsPlugin=(id,labels,steps)=>({
+  id,
+  afterDraw(ch){
+    if(!steps||!steps.length)return;
+    const{ctx,chartArea:{top,bottom},scales:{x}}=ch;
+    // Mapa hora->pasos (sumando si hay varias lecturas en la misma hora visible)
+    const stepMap={};
+    steps.forEach(s=>{ stepMap[s.time]=(stepMap[s.time]||0)+s.value; });
+    // Posición X de cada hora con pasos. Si la hora exacta no está en el eje,
+    // se ubica en la etiqueta más cercana cronológicamente.
+    const positions=[];
+    Object.keys(stepMap).forEach(t=>{
+      let idx=labels.indexOf(t);
+      if(idx<0){
+        // buscar la etiqueta más cercana por comparación de texto "HH:MM"
+        let best=-1,bestDiff=Infinity;
+        labels.forEach((lbl,i)=>{
+          const diff=Math.abs(toMin(lbl)-toMin(t));
+          if(diff<bestDiff){bestDiff=diff;best=i;}
+        });
+        idx=best;
+      }
+      if(idx>=0)positions.push({x:x.getPixelForValue(idx),time:t,value:Math.round(stepMap[t])});
+    });
+    ch._stepMarks=positions; // guardar para el hover
+    ctx.save();
+    positions.forEach(p=>{
+      ctx.strokeStyle='rgba(230,150,30,0.85)';
+      ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(p.x,top);ctx.lineTo(p.x,bottom);ctx.stroke();
+      // pequeño punto naranja arriba para que sea más visible
+      ctx.fillStyle='#E69620';
+      ctx.beginPath();ctx.arc(p.x,top+4,3,0,Math.PI*2);ctx.fill();
+    });
+    // Tooltip si el ratón está cerca de una línea
+    const m=ch._stepHover;
+    if(m){
+      let near=null,nd=14;
+      positions.forEach(p=>{const d=Math.abs(p.x-m.x);if(d<nd){nd=d;near=p;}});
+      if(near){
+        const txt=`${near.time} · ${near.value} pasos`;
+        ctx.font='600 12px system-ui';
+        const tw=ctx.measureText(txt).width;
+        const bx=Math.min(Math.max(near.x-tw/2-8,2),ch.width-tw-18),by=top+14;
+        ctx.fillStyle='rgba(20,28,40,0.95)';
+        ctx.strokeStyle='#E69620';ctx.lineWidth=1;
+        ctx.beginPath();
+        if(ctx.roundRect)ctx.roundRect(bx,by,tw+16,26,6);
+        else ctx.rect(bx,by,tw+16,26);
+        ctx.fill();ctx.stroke();
+        ctx.fillStyle='#E69620';ctx.textBaseline='middle';ctx.textAlign='left';
+        ctx.fillText(txt,bx+8,by+13);
+      }
     }
-  });
-  ctx.restore();
-}});
+    ctx.restore();
+  },
+  afterEvent(ch,args){
+    const e=args.event;
+    if(e.type==='mousemove'){ch._stepHover={x:e.x,y:e.y};args.changed=true;}
+    else if(e.type==='mouseout'){ch._stepHover=null;args.changed=true;}
+  }
+});
+// Helper: "HH:MM" -> minutos del día
+function toMin(t){const[h,m]=t.split(':').map(Number);return h*60+m;}
 function inSleepWindow(t,start,end){if(!start||!end)return true;if(start<=end)return t>=start&&t<=end;return t>=start||t<=end;}
 // Clave de orden cronológico real: usa measured_at (instante UTC) si existe,
 // si no, reconstruye con el flag prev.
