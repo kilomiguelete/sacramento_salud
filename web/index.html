@@ -597,6 +597,22 @@ function filterNight(arr,start,end){
   return inWin.sort((a,b)=>nightSortKey(a)-nightSortKey(b));
 }
 
+// Construye un EJE HORARIO COMÚN para que SpO2 y FC empiecen y acaben a la misma hora.
+// Reúne todas las horas presentes en ambas series (ya filtradas a la noche) y las ordena
+// cronológicamente cruzando medianoche. Devuelve el array de etiquetas "HH:MM".
+function commonNightAxis(...series){
+  const map={}; // time -> sortKey, para ordenar bien cruzando medianoche
+  series.forEach(arr=>(arr||[]).forEach(p=>{ if(!(p.time in map))map[p.time]=nightSortKey(p); }));
+  return Object.keys(map).sort((a,b)=>map[a]-map[b]);
+}
+// Alinea una serie al eje común: devuelve un array del mismo tamaño que 'axis',
+// con el valor en cada hora o null si no hay lectura a esa hora.
+function alignToAxis(axis,arr,key){
+  const byTime={};
+  (arr||[]).forEach(p=>{ byTime[p.time]=key?p[key]:p; });
+  return axis.map(t=>t in byTime?byTime[t]:null);
+}
+
 // ── Métricas clínicas ─────────────────────────────────────────────────────
 
 // ODI: eventos de desaturación ≥3% por hora de sueño
@@ -975,26 +991,33 @@ async function renderDay(){
 
   // SpO2 chart
   if(!s.parcial){
+  // Eje horario COMÚN para que SpO2 y FC empiecen y acaben a la misma hora
+  const ejeNoche=commonNightAxis(spo2Sleep,hrSleep);
+  const spo2Aligned=alignToAxis(ejeNoche,spo2Sleep,'value');
+
   document.getElementById('spo2Wrap').innerHTML='<canvas id="spo2Chart"></canvas>';
   charts.spo2=new Chart(document.getElementById('spo2Chart'),{
     type:'line',
-    data:{labels:spo2Sleep.map(p=>p.time),datasets:[{label:'SpO2',data:spo2Sleep.map(p=>p.value),borderColor:spo2Sleep.map(p=>sc(p.value)),borderWidth:2,pointBackgroundColor:spo2Sleep.map(p=>sc(p.value)),pointRadius:spo2Sleep.map(p=>p.value<90?5:p.value<94?4:3),tension:0.3,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>sc(ctx.p1.parsed.y)}}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`SpO2: ${ctx.parsed.y}%`}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},
-    plugins:[stepBandsPlugin('sb1',spo2Sleep.map(p=>p.time),stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]
+    data:{labels:ejeNoche,datasets:[{label:'SpO2',data:spo2Aligned,borderColor:'#1D9E75',borderWidth:2,pointBackgroundColor:spo2Aligned.map(v=>sc(v)),pointRadius:spo2Aligned.map(v=>v==null?0:v<90?5:v<94?4:3),tension:0.3,spanGaps:true,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.parsed.y!=null?`SpO2: ${ctx.parsed.y}%`:null}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},
+    plugins:[stepBandsPlugin('sb1',ejeNoche,stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
-  // FC chart
+  // FC chart — usa el MISMO eje horario que SpO2
   document.getElementById('hrWrap').innerHTML='<canvas id="hrChart"></canvas>';
   if(hrSleep.length){
+    const hrMaxA=alignToAxis(ejeNoche,hrSleep,'max');
+    const hrMinA=alignToAxis(ejeNoche,hrSleep,'min');
+    const hrAvgA=alignToAxis(ejeNoche,hrSleep,'avg');
     charts.hr=new Chart(document.getElementById('hrChart'),{
       type:'line',
-      data:{labels:hrSleep.map(p=>p.time),datasets:[
-        {label:'FC máx',data:hrSleep.map(p=>p.max),borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3},
-        {label:'FC mín',data:hrSleep.map(p=>p.min),borderColor:'transparent',pointRadius:0,fill:false,tension:0.3},
-        {label:'FC media',data:hrSleep.map(p=>p.avg),borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false},
+      data:{labels:ejeNoche,datasets:[
+        {label:'FC máx',data:hrMaxA,borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3,spanGaps:true},
+        {label:'FC mín',data:hrMinA,borderColor:'transparent',pointRadius:0,fill:false,tension:0.3,spanGaps:true},
+        {label:'FC media',data:hrAvgA,borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false,spanGaps:true},
       ]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>['FC máx','FC mín','FC media'][ctx.datasetIndex]+': '+Math.round(ctx.parsed.y)+' bpm'}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},
-      plugins:[stepBandsPlugin('sb2',hrSleep.map(p=>p.time),stepsSleep)]
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.parsed.y!=null?['FC máx','FC mín','FC media'][ctx.datasetIndex]+': '+Math.round(ctx.parsed.y)+' bpm':null}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},
+      plugins:[stepBandsPlugin('sb2',ejeNoche,stepsSleep)]
     });
   }else{
     const cv=document.getElementById('hrChart'),c2=cv.getContext('2d');
@@ -1486,9 +1509,11 @@ async function refreshCharts(){
   showScore(score,prevDate(selectedDate),odi,t90);
 
   document.getElementById('spo2Wrap').innerHTML='<canvas id="spo2Chart"></canvas>';
-  charts.spo2=new Chart(document.getElementById('spo2Chart'),{type:'line',data:{labels:spo2Sleep.map(p=>p.time),datasets:[{label:'SpO2',data:spo2Sleep.map(p=>p.value),borderColor:spo2Sleep.map(p=>sc(p.value)),borderWidth:2,pointBackgroundColor:spo2Sleep.map(p=>sc(p.value)),pointRadius:spo2Sleep.map(p=>p.value<90?5:p.value<94?4:3),tension:0.3,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>sc(ctx.p1.parsed.y)}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb1',spo2Sleep.map(p=>p.time),stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]});
+  const ejeNoche=commonNightAxis(spo2Sleep,hrSleep);
+  const spo2Aligned=alignToAxis(ejeNoche,spo2Sleep,'value');
+  charts.spo2=new Chart(document.getElementById('spo2Chart'),{type:'line',data:{labels:ejeNoche,datasets:[{label:'SpO2',data:spo2Aligned,borderColor:'#1D9E75',borderWidth:2,pointBackgroundColor:spo2Aligned.map(v=>sc(v)),pointRadius:spo2Aligned.map(v=>v==null?0:v<90?5:v<94?4:3),tension:0.3,spanGaps:true,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb1',ejeNoche,stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]});
   document.getElementById('hrWrap').innerHTML='<canvas id="hrChart"></canvas>';
-  if(hrSleep.length){charts.hr=new Chart(document.getElementById('hrChart'),{type:'line',data:{labels:hrSleep.map(p=>p.time),datasets:[{label:'FC máx',data:hrSleep.map(p=>p.max),borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3},{label:'FC mín',data:hrSleep.map(p=>p.min),borderColor:'transparent',pointRadius:0,fill:false,tension:0.3},{label:'FC media',data:hrSleep.map(p=>p.avg),borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb2',hrSleep.map(p=>p.time),stepsSleep)]});}
+  if(hrSleep.length){const hrMaxA=alignToAxis(ejeNoche,hrSleep,'max'),hrMinA=alignToAxis(ejeNoche,hrSleep,'min'),hrAvgA=alignToAxis(ejeNoche,hrSleep,'avg');charts.hr=new Chart(document.getElementById('hrChart'),{type:'line',data:{labels:ejeNoche,datasets:[{label:'FC máx',data:hrMaxA,borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3,spanGaps:true},{label:'FC mín',data:hrMinA,borderColor:'transparent',pointRadius:0,fill:false,tension:0.3,spanGaps:true},{label:'FC media',data:hrAvgA,borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb2',ejeNoche,stepsSleep)]});}
   const mb=document.getElementById('spo2ModalBtn');if(mb)mb.disabled=false;
   if(dualViewMode==='combined')renderCombinedChart();
 }
