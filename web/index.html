@@ -613,13 +613,19 @@ function alignToAxis(axis,arr,key){
   return axis.map(t=>t in byTime?byTime[t]:null);
 }
 // Recorta una serie (ej. FC) al MISMO rango temporal que la serie de referencia
-// (ej. SpO2). Usa el instante real (nightSortKey) para comparar cruzando medianoche.
+// (ej. SpO2). Usa fecha local + hora (que ambas series tienen) para comparar,
+// evitando la inconsistencia de nightSortKey (SpO2 no tiene measured_at).
 // Así la FC solo muestra desde la primera hasta la última lectura de SpO2.
+function tsKey(p){
+  // Clave temporal consistente: combina fecha local (YYYY-MM-DD) + hora (HH:MM)
+  if(p.fecha&&p.time)return new Date(p.fecha+'T'+p.time+':00').getTime();
+  return nightSortKey(p);
+}
 function clipToReference(arr,refArr){
   if(!refArr||!refArr.length)return [];
-  const keys=refArr.map(nightSortKey);
+  const keys=refArr.map(tsKey);
   const minK=Math.min(...keys), maxK=Math.max(...keys);
-  return (arr||[]).filter(p=>{const k=nightSortKey(p);return k>=minK&&k<=maxK;});
+  return (arr||[]).filter(p=>{const k=tsKey(p);return k>=minK&&k<=maxK;});
 }
 
 // ── Métricas clínicas ─────────────────────────────────────────────────────
