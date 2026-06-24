@@ -612,6 +612,15 @@ function alignToAxis(axis,arr,key){
   (arr||[]).forEach(p=>{ byTime[p.time]=key?p[key]:p; });
   return axis.map(t=>t in byTime?byTime[t]:null);
 }
+// Recorta una serie (ej. FC) al MISMO rango temporal que la serie de referencia
+// (ej. SpO2). Usa el instante real (nightSortKey) para comparar cruzando medianoche.
+// Así la FC solo muestra desde la primera hasta la última lectura de SpO2.
+function clipToReference(arr,refArr){
+  if(!refArr||!refArr.length)return [];
+  const keys=refArr.map(nightSortKey);
+  const minK=Math.min(...keys), maxK=Math.max(...keys);
+  return (arr||[]).filter(p=>{const k=nightSortKey(p);return k>=minK&&k<=maxK;});
+}
 
 // ── Métricas clínicas ─────────────────────────────────────────────────────
 
@@ -991,8 +1000,10 @@ async function renderDay(){
 
   // SpO2 chart
   if(!s.parcial){
-  // Eje horario COMÚN para que SpO2 y FC empiecen y acaben a la misma hora
-  const ejeNoche=commonNightAxis(spo2Sleep,hrSleep);
+  // El EJE lo define SOLO el SpO2 (que solo mide de noche). La FC se recorta
+  // exactamente a ese mismo rango horario.
+  const hrClipped=clipToReference(hrSleep,spo2Sleep);
+  const ejeNoche=commonNightAxis(spo2Sleep,hrClipped);
   const spo2Aligned=alignToAxis(ejeNoche,spo2Sleep,'value');
 
   document.getElementById('spo2Wrap').innerHTML='<canvas id="spo2Chart"></canvas>';
@@ -1003,12 +1014,12 @@ async function renderDay(){
     plugins:[stepBandsPlugin('sb1',ejeNoche,stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
-  // FC chart — usa el MISMO eje horario que SpO2
+  // FC chart — usa el MISMO eje horario que SpO2 (FC recortada al rango del SpO2)
   document.getElementById('hrWrap').innerHTML='<canvas id="hrChart"></canvas>';
-  if(hrSleep.length){
-    const hrMaxA=alignToAxis(ejeNoche,hrSleep,'max');
-    const hrMinA=alignToAxis(ejeNoche,hrSleep,'min');
-    const hrAvgA=alignToAxis(ejeNoche,hrSleep,'avg');
+  if(hrClipped.length){
+    const hrMaxA=alignToAxis(ejeNoche,hrClipped,'max');
+    const hrMinA=alignToAxis(ejeNoche,hrClipped,'min');
+    const hrAvgA=alignToAxis(ejeNoche,hrClipped,'avg');
     charts.hr=new Chart(document.getElementById('hrChart'),{
       type:'line',
       data:{labels:ejeNoche,datasets:[
@@ -1509,11 +1520,12 @@ async function refreshCharts(){
   showScore(score,prevDate(selectedDate),odi,t90);
 
   document.getElementById('spo2Wrap').innerHTML='<canvas id="spo2Chart"></canvas>';
-  const ejeNoche=commonNightAxis(spo2Sleep,hrSleep);
+  const hrClipped=clipToReference(hrSleep,spo2Sleep);
+  const ejeNoche=commonNightAxis(spo2Sleep,hrClipped);
   const spo2Aligned=alignToAxis(ejeNoche,spo2Sleep,'value');
   charts.spo2=new Chart(document.getElementById('spo2Chart'),{type:'line',data:{labels:ejeNoche,datasets:[{label:'SpO2',data:spo2Aligned,borderColor:'#1D9E75',borderWidth:2,pointBackgroundColor:spo2Aligned.map(v=>sc(v)),pointRadius:spo2Aligned.map(v=>v==null?0:v<90?5:v<94?4:3),tension:0.3,spanGaps:true,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb1',ejeNoche,stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]});
   document.getElementById('hrWrap').innerHTML='<canvas id="hrChart"></canvas>';
-  if(hrSleep.length){const hrMaxA=alignToAxis(ejeNoche,hrSleep,'max'),hrMinA=alignToAxis(ejeNoche,hrSleep,'min'),hrAvgA=alignToAxis(ejeNoche,hrSleep,'avg');charts.hr=new Chart(document.getElementById('hrChart'),{type:'line',data:{labels:ejeNoche,datasets:[{label:'FC máx',data:hrMaxA,borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3,spanGaps:true},{label:'FC mín',data:hrMinA,borderColor:'transparent',pointRadius:0,fill:false,tension:0.3,spanGaps:true},{label:'FC media',data:hrAvgA,borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb2',ejeNoche,stepsSleep)]});}
+  if(hrClipped.length){const hrMaxA=alignToAxis(ejeNoche,hrClipped,'max'),hrMinA=alignToAxis(ejeNoche,hrClipped,'min'),hrAvgA=alignToAxis(ejeNoche,hrClipped,'avg');charts.hr=new Chart(document.getElementById('hrChart'),{type:'line',data:{labels:ejeNoche,datasets:[{label:'FC máx',data:hrMaxA,borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3,spanGaps:true},{label:'FC mín',data:hrMinA,borderColor:'transparent',pointRadius:0,fill:false,tension:0.3,spanGaps:true},{label:'FC media',data:hrAvgA,borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb2',ejeNoche,stepsSleep)]});}
   const mb=document.getElementById('spo2ModalBtn');if(mb)mb.disabled=false;
   if(dualViewMode==='combined')renderCombinedChart();
 }
