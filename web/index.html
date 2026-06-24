@@ -649,19 +649,22 @@ function clipToReference(arr,refArr){
 // Construye el eje X acotado EXACTAMENTE al rango del SpO2:
 // desde la primera hasta la última lectura de SpO2. Incluye las horas de las
 // demás series (ej. FC) que caigan dentro de ese rango, y ordena cronológicamente.
+// Usa fecha+hora como clave interna para no mezclar lecturas de días distintos
+// a la misma hora, pero devuelve solo las etiquetas "HH:MM".
 function axisBoundedBySpo2(spo2Arr,...otherSeries){
   if(!spo2Arr||!spo2Arr.length)return [];
   const spo2Keys=spo2Arr.map(tsKey);
   const minK=Math.min(...spo2Keys), maxK=Math.max(...spo2Keys);
-  const map={}; // time -> sortKey
+  const seen={}; // "HH:MM" -> sortKey cronológico (tsKey)
   // Siempre incluir todas las horas del SpO2
-  spo2Arr.forEach(p=>{ if(!(p.time in map))map[p.time]=nightSortKey(p); });
-  // Incluir horas de las demás series solo si caen dentro del rango del SpO2
+  spo2Arr.forEach(p=>{ const k=tsKey(p); if(!(p.time in seen))seen[p.time]=k; });
+  // Incluir horas de las demás series solo si su instante real cae dentro del rango del SpO2
   otherSeries.forEach(arr=>(arr||[]).forEach(p=>{
     const k=tsKey(p);
-    if(k>=minK&&k<=maxK&&!(p.time in map))map[p.time]=nightSortKey(p);
+    if(k>=minK&&k<=maxK&&!(p.time in seen))seen[p.time]=k;
   }));
-  return Object.keys(map).sort((a,b)=>map[a]-map[b]);
+  // Ordenar por el instante real (tsKey), no por minutos sin fecha
+  return Object.keys(seen).sort((a,b)=>seen[a]-seen[b]);
 }
 
 // ── Métricas clínicas ─────────────────────────────────────────────────────
