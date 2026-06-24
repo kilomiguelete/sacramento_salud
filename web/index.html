@@ -573,7 +573,9 @@ function nightSortKey(p){
 // Usa la hora local y el flag prev para decidir si cada lectura cae en la
 // ventana de sueño (que cruza medianoche: ej. 23:08 → 07:59).
 function filterNight(arr,start,end){
-  if(!start||!end)return [...(arr||[])].sort((a,b)=>nightSortKey(a)-nightSortKey(b));
+  // Si no hay datos de sueño, usar una ventana nocturna por defecto (22:00 → 10:00)
+  // en vez de mostrar el día entero.
+  if(!start||!end){start='22:00';end='10:00';}
   const cruzaMedianoche=start>end; // ej 23:08 > 07:59
   const inWin=(arr||[]).filter(p=>{
     const t=p.time;
@@ -926,7 +928,7 @@ async function renderDay(){
   if(s.parcial){
     document.getElementById('dualSleepLabel').textContent='⏳ Noche pendiente: los datos del sueño se completarán cuando llegue la madrugada del día siguiente. La FC del día sí está disponible abajo.';
   }else{
-    document.getElementById('dualSleepLabel').textContent=sleepStart&&sleepEnd?`Ventana de sueño: ${sleepStart} – ${sleepEnd}`:'';
+    document.getElementById('dualSleepLabel').textContent=sleepStart&&sleepEnd?`Ventana de sueño: ${sleepStart} – ${sleepEnd}`:'⚠ Sin datos de sueño esta noche · mostrando franja nocturna estimada (22:00–10:00)';
   }
   // El conteo de levantadas se actualizará tras cargar el detalle
 
