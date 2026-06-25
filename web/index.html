@@ -157,6 +157,7 @@
   .trend-card .tc-delta{font-size:12px;font-weight:600;padding:2px 7px;border-radius:6px;white-space:nowrap;}
   .trend-card .tc-spark{margin-top:10px;height:36px;}
   .trend-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
+  .events-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   @media(max-width:760px){.vitals-grid,.trends-grid{grid-template-columns:1fr;}}
   .spo2-stat-val{font-size:18px;font-weight:700;}
   .spo2-stat-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;}
@@ -415,9 +416,14 @@
         <div class="sleep-legend" id="sleepLegend"></div>
       </div>
       <div class="panel">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
           <div class="panel-title" id="eventsChartTitle" style="margin-bottom:0">Caídas SpO2 &lt; 94% — últimos 30 días</div>
-          <button class="dual-btn" onclick="downloadEventsCSV()" style="padding:3px 10px">↓ CSV</button>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="dual-btn events-range-btn active" data-range="30" onclick="setEventsRange(30)">30 d</button>
+            <button class="dual-btn events-range-btn" data-range="60" onclick="setEventsRange(60)">60 d</button>
+            <button class="dual-btn events-range-btn" data-range="90" onclick="setEventsRange(90)">90 d</button>
+            <button class="dual-btn" onclick="downloadEventsCSV()" style="padding:3px 10px">↓ CSV</button>
+          </div>
         </div>
         <div style="height:120px;position:relative"><canvas id="eventsChart"></canvas></div>
       </div>
@@ -1407,15 +1413,8 @@ async function renderDay(){
     legEl.appendChild(it);
   });
 
-  // Caídas SpO2 30 días
-  const rd=allDays.slice(-30);
-  dc('events');
-  const evData=rd.map(d=>summaries[d]?.ev94??null);
-  charts.events=new Chart(document.getElementById('eventsChart'),{
-    type:'bar',
-    data:{labels:rd.map(d=>fmtDateShort(prevDate(d))),datasets:[{label:'Caídas <94%',data:evData,backgroundColor:evData.map(v=>v==null?'#1E3048':v>10?'rgba(217,64,64,.6)':v>5?'rgba(201,139,10,.6)':'rgba(29,158,117,.5)'),borderRadius:3}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y} caídas < 94%`}}},scales:{x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:10},grid:{display:false}},y:{ticks:{color:axisColor(),font:{size:9}},grid:{color:gridColor()},beginAtZero:true}}}
-  });
+  // Caídas SpO2 (rango configurable: 30/60/90 días)
+  renderEventsChart();
 
   // SpO2 mensual
   const mDays=monthsMap[selectedMonth]||[];
@@ -1598,6 +1597,29 @@ function renderTrends(){
       <div class="tc-spark">${sparkline(hist,def.color,160,36)}</div>
     </div>`;
   }).join('');
+}
+
+// ── Caídas SpO2 (30/60/90 días) ───────────────────────────────────────────
+let eventsRange=30;
+function setEventsRange(n){
+  eventsRange=n;
+  document.querySelectorAll('.events-range-btn').forEach(b=>{
+    b.classList.toggle('active',parseInt(b.dataset.range)===n);
+  });
+  renderEventsChart();
+}
+function renderEventsChart(){
+  document.getElementById('eventsChartTitle').textContent=`Caídas SpO2 < 94% — últimos ${eventsRange} días`;
+  const rd=allDays.slice(-eventsRange);
+  dc('events');
+  const evData=rd.map(d=>summaries[d]?.ev94??null);
+  // Con más días, menos etiquetas en el eje para que no se amontonen
+  const maxTicks=eventsRange<=30?10:eventsRange<=60?12:14;
+  charts.events=new Chart(document.getElementById('eventsChart'),{
+    type:'bar',
+    data:{labels:rd.map(d=>fmtDateShort(prevDate(d))),datasets:[{label:'Caídas <94%',data:evData,backgroundColor:evData.map(v=>v==null?gridColor():v>10?'rgba(217,64,64,.6)':v>5?'rgba(201,139,10,.6)':'rgba(29,158,117,.5)'),borderRadius:2}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items[0].label,label:ctx=>`${ctx.parsed.y} caídas < 94%`}}},scales:{x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:maxTicks,maxRotation:0,minRotation:0,autoSkip:true},grid:{display:false}},y:{ticks:{color:axisColor(),font:{size:9}},grid:{color:gridColor()},beginAtZero:true}}}
+  });
 }
 
 // ── Resumen del mes ───────────────────────────────────────────────────────
@@ -2164,10 +2186,10 @@ function downloadHR24CSV(){
 
 // Caídas por noche (últimos 30 días)
 function downloadEventsCSV(){
-  const rd=allDays.slice(-30);
+  const rd=allDays.slice(-eventsRange);
   const rows=[['Noche del','Caídas <94%','Caídas <90%','SpO2 mín (%)']];
   rd.forEach(d=>{const s=summaries[d];rows.push([prevDate(d),s?.ev94??'',s?.ev90??'',s?.spo2_min??'']);});
-  downloadCSVFile(rows,`caidas-spo2-30dias.csv`);
+  downloadCSVFile(rows,`caidas-spo2-${eventsRange}dias.csv`);
 }
 
 // SpO2 mínimo del mes
