@@ -91,8 +91,7 @@
   .legend{display:flex;gap:14px;margin-top:8px;flex-wrap:wrap;}
   .legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);}
   .legend-line{display:inline-block;width:18px;height:2px;}
-  .sleep-bar{display:flex;border-radius:6px;overflow:hidden;height:26px;margin-bottom:10px;}
-  .sleep-seg{display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:rgba(255,255,255,.85);}
+  .sleep-bar{display:flex;border-radius:6px;overflow:hidden;height:26px;margin-bottom:10px;}.sleep-seg{display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:rgba(255,255,255,.85);}
   .sleep-legend{display:flex;flex-wrap:wrap;gap:4px 12px;}
   .sleep-leg-item{display:flex;align-items:center;gap:5px;}
   .sleep-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0;}
@@ -142,6 +141,22 @@
   .spo2-modal-header{flex-shrink:0;margin-bottom:14px;}
   .spo2-stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;flex-shrink:0;}
   .spo2-stat{background:var(--bg);border-radius:8px;padding:10px 8px;text-align:center;}
+  .vitals-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .vital-card{background:var(--bg);border-radius:10px;padding:14px;border-left:3px solid var(--border);}
+  .vital-card .vc-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;}
+  .vital-card .vc-value{font-size:24px;font-weight:700;line-height:1;}
+  .vital-card .vc-unit{font-size:13px;font-weight:500;color:var(--muted);}
+  .vital-card .vc-foot{font-size:11px;color:var(--muted);margin-top:8px;display:flex;align-items:center;gap:5px;}
+  .vital-card .vc-spark{margin-top:8px;height:32px;}
+  .trends-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .trend-card{background:var(--bg);border-radius:10px;padding:14px;}
+  .trend-card .tc-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;}
+  .trend-card .tc-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+  .trend-card .tc-value{font-size:22px;font-weight:700;line-height:1;}
+  .trend-card .tc-delta{font-size:12px;font-weight:600;padding:2px 7px;border-radius:6px;white-space:nowrap;}
+  .trend-card .tc-spark{margin-top:10px;height:36px;}
+  .trend-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
+  @media(max-width:760px){.vitals-grid,.trends-grid{grid-template-columns:1fr;}}
   .spo2-stat-val{font-size:18px;font-weight:700;}
   .spo2-stat-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;}
   .spo2-histo{flex-shrink:0;height:120px;position:relative;margin-bottom:12px;}
@@ -362,6 +377,32 @@
       <div style="height:200px;position:relative" id="spo224Wrap">
         <div class="chart-loading"><div class="mini-spin"></div>Cargando…</div>
       </div>
+    </div>
+
+    <!-- Signos vitales nocturnos -->
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+        <div>
+          <div class="panel-title" id="vitalsTitle" style="margin-bottom:3px">Signos vitales nocturnos</div>
+          <div style="font-size:11px;color:var(--muted)" id="vitalsSub">Respiración, temperatura y recuperación durante el sueño</div>
+        </div>
+      </div>
+      <div id="vitalsCards" class="vitals-grid"></div>
+    </div>
+
+    <!-- Tendencias 7/30 días -->
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div class="panel-title" id="trendsTitle" style="margin-bottom:3px">Tendencias</div>
+          <div style="font-size:11px;color:var(--muted)" id="trendsSub">Evolución de las métricas clave</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="dual-btn trend-range-btn active" data-range="7" onclick="setTrendRange(7)">7 días</button>
+          <button class="dual-btn trend-range-btn" data-range="30" onclick="setTrendRange(30)">30 días</button>
+        </div>
+      </div>
+      <div id="trendsCards" class="trends-grid"></div>
     </div>
 
     <!-- Fases + caídas -->
@@ -1380,6 +1421,157 @@ async function renderDay(){
   renderHR24();
   // Renderizar SpO2 24h
   renderSpo224();
+  // Signos vitales nocturnos y tendencias
+  renderVitals();
+  renderTrends();
+}
+
+// ── Signos vitales nocturnos ──────────────────────────────────────────────
+// Devuelve los últimos N valores (no nulos) de una métrica hasta selectedDate.
+function recentValues(getter,n,uptoDate){
+  const idx=allDays.indexOf(uptoDate);
+  const end=idx>=0?idx:allDays.length-1;
+  const out=[];
+  for(let i=end;i>=0&&out.length<n;i--){
+    const v=getter(allDays[i]);
+    if(v!=null&&!isNaN(v))out.unshift({date:allDays[i],value:v});
+  }
+  return out;
+}
+// Mini-sparkline SVG a partir de un array de {value}. color hex.
+function sparkline(arr,color,w=120,h=32){
+  if(!arr||arr.length<2)return '<div style="font-size:11px;color:var(--muted)">Sin histórico</div>';
+  const vals=arr.map(p=>p.value);
+  const mn=Math.min(...vals),mx=Math.max(...vals),rng=(mx-mn)||1;
+  const pts=arr.map((p,i)=>{
+    const x=(i/(arr.length-1))*(w-4)+2;
+    const y=h-2-((p.value-mn)/rng)*(h-4);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const last=arr[arr.length-1];
+  const lx=w-2,ly=h-2-((last.value-mn)/rng)*(h-4);
+  return `<svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.5" fill="${color}"/>
+  </svg>`;
+}
+
+function renderVitals(){
+  if(!selectedDate)return;
+  const v=summaries[selectedDate]?.vitals;
+  const cont=document.getElementById('vitalsCards');
+  document.getElementById('vitalsSub').textContent=`Noche del ${fmtDateShort(prevDate(selectedDate))} al ${fmtDateShort(selectedDate)}`;
+
+  // Definición de cada signo vital: getter, unidad, color, y cómo evaluar si es normal
+  const defs=[
+    {key:'resp',label:'Frec. respiratoria',unit:'rpm',color:'#5B9BD5',
+     get:d=>summaries[d]?.vitals?.respiratory_rate_avg,
+     fmt:x=>Math.round(x),
+     evalFn:x=>x>20?['#D94040','Elevada']:x<10?['#C98B0A','Baja']:['#1D9E75','Normal']},
+    {key:'temp',label:'Temp. muñeca',unit:'°C',color:'#E0884A',
+     get:d=>summaries[d]?.vitals?.wrist_temperature,
+     fmt:x=>x.toFixed(1),
+     evalFn:(x,base)=>base!=null&&x-base>0.5?['#D94040','Elevada']:base!=null&&x-base<-0.5?['#5B9BD5','Baja']:['#1D9E75','Estable']},
+    {key:'hrv',label:'VFC (recuperación)',unit:'ms',color:'#9B7FD4',
+     get:d=>summaries[d]?.vitals?.hrv_avg,
+     fmt:x=>Math.round(x),
+     evalFn:(x,base)=>base!=null&&x<base*0.7?['#C98B0A','Baja']:['#1D9E75','Buena']},
+  ];
+
+  cont.innerHTML=defs.map(def=>{
+    const val=def.get(selectedDate);
+    const hist=recentValues(def.get,14,selectedDate);
+    // Base = mediana de los valores históricos (excluyendo el actual)
+    const baseArr=hist.slice(0,-1).map(p=>p.value).sort((a,b)=>a-b);
+    const base=baseArr.length?baseArr[Math.floor(baseArr.length/2)]:null;
+    let estado=['var(--muted)','–'],valStr='–';
+    if(val!=null){
+      estado=def.evalFn(val,base);
+      valStr=def.fmt(val);
+    }
+    const [col,txt]=estado;
+    return `<div class="vital-card" style="border-left-color:${col}">
+      <div class="vc-label">${def.label}</div>
+      <div class="vc-value" style="color:${col}">${valStr}<span class="vc-unit"> ${val!=null?def.unit:''}</span></div>
+      <div class="vc-foot"><span style="width:7px;height:7px;border-radius:50%;background:${col};display:inline-block"></span>${txt}${base!=null&&val!=null?` · base ${def.fmt(base)}${def.unit}`:''}</div>
+      <div class="vc-spark">${sparkline(hist,def.color)}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Tendencias 7/30 días ──────────────────────────────────────────────────
+let trendRange=7;
+function setTrendRange(n){
+  trendRange=n;
+  document.querySelectorAll('.trend-range-btn').forEach(b=>{
+    b.classList.toggle('active',parseInt(b.dataset.range)===n);
+  });
+  renderTrends();
+}
+function renderTrends(){
+  if(!selectedDate)return;
+  document.getElementById('trendsSub').textContent=`Evolución en los últimos ${trendRange} días (hasta ${fmtDateShort(selectedDate)})`;
+  const cont=document.getElementById('trendsCards');
+
+  // Métricas a seguir. 'better' indica qué dirección es buena: 'up' o 'down'.
+  const defs=[
+    {label:'SpO2 mínima',unit:'%',color:'#1D9E75',better:'up',
+     get:d=>summaries[d]?.spo2_min,fmt:x=>Math.round(x)},
+    {label:'Caídas <90% (noche)',unit:'',color:'#C98B0A',better:'down',
+     get:d=>summaries[d]?.ev90,fmt:x=>Math.round(x)},
+    {label:'FC en reposo',unit:'bpm',color:'#C25880',better:'down',
+     get:d=>summaries[d]?.vitals?.resting_heart_rate,fmt:x=>Math.round(x)},
+    {label:'Frec. respiratoria',unit:'rpm',color:'#5B9BD5',better:'stable',
+     get:d=>summaries[d]?.vitals?.respiratory_rate_avg,fmt:x=>Math.round(x)},
+    {label:'Temp. muñeca',unit:'°C',color:'#E0884A',better:'stable',
+     get:d=>summaries[d]?.vitals?.wrist_temperature,fmt:x=>x.toFixed(1)},
+    {label:'VFC',unit:'ms',color:'#9B7FD4',better:'up',
+     get:d=>summaries[d]?.vitals?.hrv_avg,fmt:x=>Math.round(x)},
+  ];
+
+  cont.innerHTML=defs.map(def=>{
+    const getter=def.rawGet||def.get;
+    const hist=recentValues(getter,trendRange,selectedDate);
+    if(hist.length<2){
+      return `<div class="trend-card"><div class="tc-label">${def.label}</div>
+        <div class="tc-row"><div class="tc-value" style="color:var(--muted)">–</div></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">Sin datos suficientes</div></div>`;
+    }
+    const vals=hist.map(p=>p.value);
+    const avg=vals.reduce((a,b)=>a+b,0)/vals.length;
+    // Comparar primera mitad vs segunda mitad para detectar tendencia
+    const mid=Math.floor(vals.length/2);
+    const firstHalf=vals.slice(0,mid),secondHalf=vals.slice(mid);
+    const avg1=firstHalf.reduce((a,b)=>a+b,0)/firstHalf.length;
+    const avg2=secondHalf.reduce((a,b)=>a+b,0)/secondHalf.length;
+    const diff=avg2-avg1;
+    const pct=avg1!==0?(diff/Math.abs(avg1))*100:0;
+
+    // Color del delta según si la dirección es buena/mala
+    let deltaCol='var(--muted)',arrow='→';
+    const sig=Math.abs(pct)>=3; // umbral de cambio significativo
+    if(sig){
+      arrow=diff>0?'↑':'↓';
+      if(def.better==='stable'){
+        deltaCol=Math.abs(pct)>8?'#C98B0A':'var(--muted)';
+      }else{
+        const bueno=(def.better==='up'&&diff>0)||(def.better==='down'&&diff<0);
+        deltaCol=bueno?'#1D9E75':'#D94040';
+      }
+    }
+    const deltaTxt=sig?`${arrow} ${Math.abs(pct).toFixed(0)}%`:'estable';
+    const avgStr=def.fmt(avg);
+
+    return `<div class="trend-card">
+      <div class="tc-label">${def.label}</div>
+      <div class="tc-row">
+        <div class="tc-value" style="color:${def.color}">${avgStr}<span style="font-size:13px;color:var(--muted);font-weight:500"> ${def.unit}</span></div>
+        <div class="tc-delta" style="color:${deltaCol};background:${deltaCol==='var(--muted)'?'var(--border)':deltaCol+'22'}">${deltaTxt}</div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:3px">media de ${hist.length} días</div>
+      <div class="tc-spark">${sparkline(hist,def.color,160,36)}</div>
+    </div>`;
+  }).join('');
 }
 
 // ── Resumen del mes ───────────────────────────────────────────────────────
