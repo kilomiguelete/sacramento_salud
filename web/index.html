@@ -8,7 +8,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
-  :root{--bg:#0B1220;--surface:#121E30;--border:#1E3048;--text:#E0EAF8;--muted:#6B8BAD;--good:#1D9E75;--warn:#C98B0A;--bad:#D94040;--purple:#7A6EE8;--pink:#C25880;--teal:#1A9E8F;--radius:12px;}
+  :root{--bg:#0B1220;--surface:#121E30;--border:#1E3048;--text:#E0EAF8;--muted:#6B8BAD;--good:#1D9E75;--warn:#C98B0A;--bad:#D94040;--purple:#7A6EE8;--pink:#C25880;--teal:#1A9E8F;--radius:12px;--grid:#1E3048;--axis:#6B8BAD;}
+  body.dia{--bg:#EEF2F8;--surface:#FFFFFF;--border:#D4DEEC;--text:#1A2738;--muted:#5A7290;--good:#15805E;--warn:#A8740A;--bad:#C2362F;--purple:#5A4FC0;--pink:#A8466A;--teal:#13837A;--grid:#DCE4F0;--axis:#5A7290;}
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{max-width:100%;overflow-x:hidden;}
   body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh;}
@@ -178,6 +179,7 @@
       <h1>Dashboard de salud</h1>
     </div>
     <div class="header-actions">
+      <button class="btn" id="themeToggle" onclick="toggleTheme()" title="Cambiar modo día/noche">🌙 Modo noche</button>
       <button class="btn btn-csv" onclick="openCsvModal()">↓ CSV</button>
       <button class="btn btn-pdf" onclick="openPdfModal()">↓ PDF</button>
       <button class="btn" onclick="init()">↺ Actualizar</button>
@@ -635,6 +637,9 @@ function prevDate(d){const dt=new Date(d+'T12:00:00');dt.setDate(dt.getDate()-1)
 function nextDate(d){const dt=new Date(d+'T12:00:00');dt.setDate(dt.getDate()+1);return dt.toISOString().substring(0,10);}
 function sc(v){if(v==null)return'#1D9E75';if(v<90)return'#D94040';if(v<94)return'#C98B0A';return'#1D9E75';}
 function dc(k){if(charts[k]){charts[k].destroy();delete charts[k];}}
+// Colores de rejilla y ejes según el tema actual (leídos de las variables CSS)
+function gridColor(){return getComputedStyle(document.body).getPropertyValue('--grid').trim()||'#1E3048';}
+function axisColor(){return getComputedStyle(document.body).getPropertyValue('--axis').trim()||'#6B8BAD';}
 const rlPlugin=(id,vals)=>({id,afterDraw(ch){
   const{ctx,chartArea:{left,right},scales:{y}}=ch;
   vals.forEach(([v,c])=>{const yp=y.getPixelForValue(v);ctx.save();ctx.strokeStyle=c;ctx.lineWidth=1;ctx.setLineDash([5,4]);ctx.globalAlpha=.8;ctx.beginPath();ctx.moveTo(left,yp);ctx.lineTo(right,yp);ctx.stroke();ctx.restore();});
@@ -1006,6 +1011,27 @@ async function selectDay(date,force=false){
 }
 function prevDay(){const i=allDays.indexOf(selectedDate);if(i>0)selectDay(allDays[i-1]);}
 function nextDay(){const i=allDays.indexOf(selectedDate);if(i<allDays.length-1)selectDay(allDays[i+1]);}
+// ── Modo día / noche ──────────────────────────────────────────────────────
+function applyTheme(modo){
+  const body=document.body;
+  const btn=document.getElementById('themeToggle');
+  if(modo==='dia'){
+    body.classList.add('dia');
+    if(btn)btn.textContent='☀️ Modo día';
+  }else{
+    body.classList.remove('dia');
+    if(btn)btn.textContent='🌙 Modo noche';
+  }
+  // Re-renderizar las gráficas para que tomen los colores del nuevo tema
+  if(selectedDate){
+    renderDay();
+  }
+}
+function toggleTheme(){
+  const esDia=document.body.classList.contains('dia');
+  applyTheme(esDia?'noche':'dia');
+}
+
 function jumpToday(){
   const t=new Date().toISOString().substring(0,10);
   const cl=allDays.reduce((a,b)=>Math.abs(new Date(b)-new Date(t))<Math.abs(new Date(a)-new Date(t))?b:a,allDays[allDays.length-1]);
@@ -1089,8 +1115,8 @@ function drawSpo2Histo(arr){
       responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},title:{display:true,text:'Distribución de SpO2',color:'#6B8BAD',font:{size:10}}},
       scales:{
-        x:{ticks:{color:'#6B8BAD',font:{size:9}},grid:{display:false}},
-        y:{ticks:{color:'#6B8BAD',font:{size:9}},grid:{color:'#1E3048'},beginAtZero:true,title:{display:true,text:'Nº lecturas',color:'#6B8BAD',font:{size:9}}},
+        x:{ticks:{color:axisColor(),font:{size:9}},grid:{display:false}},
+        y:{ticks:{color:axisColor(),font:{size:9}},grid:{color:gridColor()},beginAtZero:true,title:{display:true,text:'Nº lecturas',color:'#6B8BAD',font:{size:9}}},
       }
     }
   });
@@ -1335,7 +1361,7 @@ async function renderDay(){
   charts.spo2=new Chart(document.getElementById('spo2Chart'),{
     type:'line',
     data:{labels:ejeNoche,datasets:[{label:'SpO2',data:spo2Aligned,borderColor:'#1D9E75',borderWidth:2,pointBackgroundColor:spo2Aligned.map(v=>sc(v)),pointRadius:spo2Aligned.map(v=>v==null?0:v<90?5:v<94?4:3),tension:0.3,spanGaps:true,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.parsed.y!=null?`SpO2: ${ctx.parsed.y}%`:null}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.parsed.y!=null?`SpO2: ${ctx.parsed.y}%`:null}}},scales:{x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:6},grid:{color:gridColor()}},y:{min:78,max:100,ticks:{color:axisColor(),font:{size:9},callback:v=>v+'%'},grid:{color:gridColor()}}}},
     plugins:[stepBandsPlugin('sb1',ejeNoche,stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
@@ -1352,7 +1378,7 @@ async function renderDay(){
         {label:'FC mín',data:hrMinA,borderColor:'transparent',pointRadius:0,fill:false,tension:0.3,spanGaps:true},
         {label:'FC media',data:hrAvgA,borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false,spanGaps:true},
       ]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.parsed.y!=null?['FC máx','FC mín','FC media'][ctx.datasetIndex]+': '+Math.round(ctx.parsed.y)+' bpm':null}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.parsed.y!=null?['FC máx','FC mín','FC media'][ctx.datasetIndex]+': '+Math.round(ctx.parsed.y)+' bpm':null}}},scales:{x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:6},grid:{color:gridColor()}},y:{ticks:{color:axisColor(),font:{size:9},callback:v=>v+' bpm'},grid:{color:gridColor()}}}},
       plugins:[stepBandsPlugin('sb2',ejeNoche,stepsSleep)]
     });
   }else{
@@ -1388,7 +1414,7 @@ async function renderDay(){
   charts.events=new Chart(document.getElementById('eventsChart'),{
     type:'bar',
     data:{labels:rd.map(d=>fmtDateShort(prevDate(d))),datasets:[{label:'Caídas <94%',data:evData,backgroundColor:evData.map(v=>v==null?'#1E3048':v>10?'rgba(217,64,64,.6)':v>5?'rgba(201,139,10,.6)':'rgba(29,158,117,.5)'),borderRadius:3}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y} caídas < 94%`}}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:10},grid:{display:false}},y:{ticks:{color:'#6B8BAD',font:{size:9}},grid:{color:'#1E3048'},beginAtZero:true}}}
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y} caídas < 94%`}}},scales:{x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:10},grid:{display:false}},y:{ticks:{color:axisColor(),font:{size:9}},grid:{color:gridColor()},beginAtZero:true}}}
   });
 
   // SpO2 mensual
@@ -1399,7 +1425,7 @@ async function renderDay(){
   charts.spo2Month=new Chart(document.getElementById('spo2MonthChart'),{
     type:'bar',
     data:{labels:mDays.map(d=>new Date(prevDate(d)+'T12:00:00').getDate()),datasets:[{label:'SpO2 mín',data:mSpo2,backgroundColor:mSpo2.map(v=>sc(v)+'CC'),borderColor:mSpo2.map(v=>sc(v)),borderWidth:1,borderRadius:3}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9}},grid:{display:false}},y:{min:75,max:100,ticks:{color:'#6B8BAD',font:{size:9}},grid:{color:'#1E3048'}}}},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:axisColor(),font:{size:9}},grid:{display:false}},y:{min:75,max:100,ticks:{color:axisColor(),font:{size:9}},grid:{color:gridColor()}}}},
     plugins:[rlPlugin('rl2',[[94,'#C98B0A'],[90,'#D94040']])]
   });
 
@@ -1766,8 +1792,8 @@ async function renderHR24(){
         return `${n}: ${Math.round(ctx.parsed.y)} bpm${isPeak&&ctx.datasetIndex===2?'  ⚠ PICO':''}`;
       }}}},
       scales:{
-        x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:10,maxRotation:0,minRotation:0,autoSkip:true},grid:{color:'#1E3048'}},
-        y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}},
+        x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:10,maxRotation:0,minRotation:0,autoSkip:true},grid:{color:gridColor()}},
+        y:{ticks:{color:axisColor(),font:{size:9},callback:v=>v+' bpm'},grid:{color:gridColor()}},
       }
     },
     plugins:[stepBandsPlugin('sbHr24',hrSorted.map(p=>p.time),stepsDayX),{id:'hrMeanLine',afterDraw(ch){
@@ -1839,8 +1865,8 @@ async function renderSpo224(){
       responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.parsed.y!=null?`SpO2: ${ctx.parsed.y}%`:null}}},
       scales:{
-        x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:10,maxRotation:0,minRotation:0,autoSkip:true},grid:{color:'#1E3048'}},
-        y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}},
+        x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:10,maxRotation:0,minRotation:0,autoSkip:true},grid:{color:gridColor()}},
+        y:{min:78,max:100,ticks:{color:axisColor(),font:{size:9},callback:v=>v+'%'},grid:{color:gridColor()}},
       }
     },
     plugins:[stepBandsPlugin('sbSpo224',labels,stepsDayX),rlPlugin('rlSpo224',[[94,'#C98B0A'],[90,'#D94040']])]
@@ -2032,11 +2058,11 @@ function renderCombinedChart(){
         }}}
       },
       scales:{
-        x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:8},grid:{color:'#1E3048'}},
+        x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:8},grid:{color:gridColor()}},
         // SpO2 en la banda superior
         ySpo2:{position:'left',min:ySpo2Min,max:ySpo2Max,
           ticks:{color:'#1D9E75',font:{size:9},stepSize:5,callback:v=>v>=78?v+'%':''},
-          grid:{color:'#1E3048'},title:{display:true,text:'SpO2 (%)',color:'#1D9E75',font:{size:10,weight:'bold'}}},
+          grid:{color:gridColor()},title:{display:true,text:'SpO2 (%)',color:'#1D9E75',font:{size:10,weight:'bold'}}},
         // FC en la banda inferior
         yHr:{position:'right',min:yHrMin,max:yHrMax,
           ticks:{color:'#C25880',font:{size:9},callback:v=>v<=hrMax+5?v:''},
@@ -2086,9 +2112,9 @@ async function refreshCharts(){
   const hrClipped=clipToReference(hrSleep,spo2Sleep);
   const ejeNoche=axisBoundedBySpo2(spo2Sleep,hrClipped);
   const spo2Aligned=alignToAxis(ejeNoche,spo2Sleep,'value');
-  charts.spo2=new Chart(document.getElementById('spo2Chart'),{type:'line',data:{labels:ejeNoche,datasets:[{label:'SpO2',data:spo2Aligned,borderColor:'#1D9E75',borderWidth:2,pointBackgroundColor:spo2Aligned.map(v=>sc(v)),pointRadius:spo2Aligned.map(v=>v==null?0:v<90?5:v<94?4:3),tension:0.3,spanGaps:true,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{min:78,max:100,ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+'%'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb1',ejeNoche,stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]});
+  charts.spo2=new Chart(document.getElementById('spo2Chart'),{type:'line',data:{labels:ejeNoche,datasets:[{label:'SpO2',data:spo2Aligned,borderColor:'#1D9E75',borderWidth:2,pointBackgroundColor:spo2Aligned.map(v=>sc(v)),pointRadius:spo2Aligned.map(v=>v==null?0:v<90?5:v<94?4:3),tension:0.3,spanGaps:true,fill:{target:'origin',above:'rgba(29,158,117,.08)'},segment:{borderColor:ctx=>ctx.p1.parsed.y!=null?sc(ctx.p1.parsed.y):'#1D9E75'}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:6},grid:{color:gridColor()}},y:{min:78,max:100,ticks:{color:axisColor(),font:{size:9},callback:v=>v+'%'},grid:{color:gridColor()}}}},plugins:[stepBandsPlugin('sb1',ejeNoche,stepsSleep),rlPlugin('rl1',[[94,'#C98B0A'],[90,'#D94040']])]});
   document.getElementById('hrWrap').innerHTML='<canvas id="hrChart"></canvas>';
-  if(hrClipped.length){const hrMaxA=alignToAxis(ejeNoche,hrClipped,'max'),hrMinA=alignToAxis(ejeNoche,hrClipped,'min'),hrAvgA=alignToAxis(ejeNoche,hrClipped,'avg');charts.hr=new Chart(document.getElementById('hrChart'),{type:'line',data:{labels:ejeNoche,datasets:[{label:'FC máx',data:hrMaxA,borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3,spanGaps:true},{label:'FC mín',data:hrMinA,borderColor:'transparent',pointRadius:0,fill:false,tension:0.3,spanGaps:true},{label:'FC media',data:hrAvgA,borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#6B8BAD',font:{size:9},maxTicksLimit:6},grid:{color:'#1E3048'}},y:{ticks:{color:'#6B8BAD',font:{size:9},callback:v=>v+' bpm'},grid:{color:'#1E3048'}}}},plugins:[stepBandsPlugin('sb2',ejeNoche,stepsSleep)]});}
+  if(hrClipped.length){const hrMaxA=alignToAxis(ejeNoche,hrClipped,'max'),hrMinA=alignToAxis(ejeNoche,hrClipped,'min'),hrAvgA=alignToAxis(ejeNoche,hrClipped,'avg');charts.hr=new Chart(document.getElementById('hrChart'),{type:'line',data:{labels:ejeNoche,datasets:[{label:'FC máx',data:hrMaxA,borderColor:'transparent',pointRadius:0,fill:'+1',backgroundColor:'rgba(194,88,128,0.15)',tension:0.3,spanGaps:true},{label:'FC mín',data:hrMinA,borderColor:'transparent',pointRadius:0,fill:false,tension:0.3,spanGaps:true},{label:'FC media',data:hrAvgA,borderColor:'#C25880',borderWidth:2,pointBackgroundColor:'#C25880',pointRadius:2,tension:0.3,fill:false,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:6},grid:{color:gridColor()}},y:{ticks:{color:axisColor(),font:{size:9},callback:v=>v+' bpm'},grid:{color:gridColor()}}}},plugins:[stepBandsPlugin('sb2',ejeNoche,stepsSleep)]});}
   const mb=document.getElementById('spo2ModalBtn');if(mb)mb.disabled=false;
   if(dualViewMode==='combined')renderCombinedChart();
 }
