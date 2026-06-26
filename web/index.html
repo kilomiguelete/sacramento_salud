@@ -158,6 +158,7 @@
   .trend-card .tc-spark{margin-top:10px;height:36px;}
   .trend-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .events-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
+  .sleep-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   @media(max-width:760px){.vitals-grid,.trends-grid{grid-template-columns:1fr;}}
   .spo2-stat-val{font-size:18px;font-weight:700;}
   .spo2-stat-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;}
@@ -406,6 +407,22 @@
         </div>
       </div>
       <div id="trendsCards" class="trends-grid"></div>
+    </div>
+
+    <!-- Sueño total (7 días / mensual) -->
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div class="panel-title" id="sleepChartTitle" style="margin-bottom:3px">Sueño total — últimos 7 días</div>
+          <div style="font-size:11px;color:var(--muted)" id="sleepChartSub">Horas de sueño por noche</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="dual-btn sleep-range-btn active" data-range="7" onclick="setSleepRange(7)">7 días</button>
+          <button class="dual-btn sleep-range-btn" data-range="month" onclick="setSleepRange('month')">Mes</button>
+          <button class="dual-btn" onclick="downloadSleepCSV()" style="padding:3px 10px">↓ CSV</button>
+        </div>
+      </div>
+      <div style="height:160px;position:relative"><canvas id="sleepChart"></canvas></div>
     </div>
 
     <!-- Fases + caídas -->
@@ -1449,6 +1466,7 @@ async function renderDay(){
   // Signos vitales nocturnos y tendencias
   renderVitals();
   renderTrends();
+  renderSleepChart();
 }
 
 // ── Signos vitales nocturnos ──────────────────────────────────────────────
@@ -1620,6 +1638,72 @@ function renderEventsChart(){
     data:{labels:rd.map(d=>fmtDateShort(prevDate(d))),datasets:[{label:'Caídas <94%',data:evData,backgroundColor:evData.map(v=>v==null?gridColor():v>10?'rgba(217,64,64,.6)':v>5?'rgba(201,139,10,.6)':'rgba(29,158,117,.5)'),borderRadius:2}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items[0].label,label:ctx=>`${ctx.parsed.y} caídas < 94%`}}},scales:{x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:maxTicks,maxRotation:0,minRotation:0,autoSkip:true},grid:{display:false}},y:{ticks:{color:axisColor(),font:{size:9}},grid:{color:gridColor()},beginAtZero:true}}}
   });
+}
+
+// ── Sueño total (7 días / mensual) ────────────────────────────────────────
+let sleepRange=7;
+function setSleepRange(r){
+  sleepRange=r;
+  document.querySelectorAll('.sleep-range-btn').forEach(b=>{
+    b.classList.toggle('active',b.dataset.range===String(r));
+  });
+  renderSleepChart();
+}
+function renderSleepChart(){
+  if(!selectedDate)return;
+  // Días a mostrar: últimos 7 hasta selectedDate, o todo el mes seleccionado
+  let rd;
+  if(sleepRange==='month'){
+    rd=monthsMap[selectedMonth]||[];
+    document.getElementById('sleepChartTitle').textContent=`Sueño total — ${fmtMonthLabel(selectedMonth)}`;
+  }else{
+    rd=allDays.slice(-7);
+    document.getElementById('sleepChartTitle').textContent='Sueño total — últimos 7 días';
+  }
+  const data=rd.map(d=>summaries[d]?.sleep?.total_sleep??null);
+  // Media de las noches con dato (para subtítulo y línea de referencia)
+  const valid=data.filter(v=>v!=null);
+  const avg=valid.length?valid.reduce((a,b)=>a+b,0)/valid.length:null;
+  document.getElementById('sleepChartSub').textContent=avg!=null
+    ?`Horas por noche · media ${fmtH(avg)}`
+    :'Horas de sueño por noche';
+
+  // Color por calidad de duración: <6h ámbar, <5h rojo, ≥7h verde fuerte
+  const barColor=v=>v==null?gridColor():v<5?'rgba(217,64,64,.65)':v<6?'rgba(201,139,10,.6)':v>=7?'rgba(29,158,117,.6)':'rgba(122,110,232,.55)';
+  const maxTicks=sleepRange==='month'?12:7;
+
+  dc('sleep');
+  charts.sleep=new Chart(document.getElementById('sleepChart'),{
+    type:'bar',
+    data:{labels:rd.map(d=>fmtDateShort(prevDate(d))),datasets:[{label:'Sueño total',data,backgroundColor:data.map(barColor),borderRadius:3}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{title:items=>items[0].label,label:ctx=>ctx.parsed.y!=null?`Sueño: ${fmtH(ctx.parsed.y)}`:'Sin dato'}},
+      },
+      scales:{
+        x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:maxTicks,maxRotation:0,minRotation:0,autoSkip:true},grid:{display:false}},
+        y:{ticks:{color:axisColor(),font:{size:9},callback:v=>v+'h'},grid:{color:gridColor()},beginAtZero:true,suggestedMax:9},
+      }
+    },
+    plugins:[{id:'sleepRefLine',afterDraw(ch){
+      if(avg==null)return;
+      const{ctx,chartArea:{left,right},scales:{y}}=ch;
+      const yp=y.getPixelForValue(avg);
+      ctx.save();ctx.strokeStyle=axisColor();ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.globalAlpha=.6;
+      ctx.beginPath();ctx.moveTo(left,yp);ctx.lineTo(right,yp);ctx.stroke();ctx.restore();
+    }}]
+  });
+}
+function downloadSleepCSV(){
+  let rd;
+  if(sleepRange==='month'){rd=monthsMap[selectedMonth]||[];}
+  else{rd=allDays.slice(-7);}
+  const rows=[['Noche del','Sueño total (h)','Profundo (h)','REM (h)','Ligero (h)','Despierto (h)']];
+  rd.forEach(d=>{const s=summaries[d]?.sleep;rows.push([prevDate(d),s?.total_sleep??'',s?.deep??'',s?.rem??'',s?.core??'',s?.awake??'']);});
+  const nombre=sleepRange==='month'?`sueno-${selectedMonth}.csv`:`sueno-7dias.csv`;
+  downloadCSVFile(rows,nombre);
 }
 
 // ── Resumen del mes ───────────────────────────────────────────────────────
