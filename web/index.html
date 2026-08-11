@@ -175,6 +175,14 @@
   .corr-desc{font-size:12px;color:var(--muted);line-height:1.4;}
   .corr-bar{height:5px;border-radius:3px;background:var(--border);margin-top:6px;overflow:hidden;}
   .corr-bar-fill{height:100%;border-radius:3px;}
+  .evo-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
+  .evo-item{padding:12px 0;border-top:1px solid var(--border);}
+  .evo-item:first-child{border-top:none;}
+  .evo-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;}
+  .evo-name{font-size:13px;font-weight:700;color:var(--text);}
+  .evo-verdict{font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;white-space:nowrap;display:flex;align-items:center;gap:4px;}
+  .evo-nums{font-size:12px;color:var(--muted);margin-bottom:2px;}
+  .evo-desc{font-size:12px;color:var(--text);line-height:1.45;}
   @media(max-width:760px){.vitals-grid,.trends-grid{grid-template-columns:1fr;}}
   .spo2-stat-val{font-size:18px;font-weight:700;}
   .spo2-stat-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;}
@@ -457,6 +465,22 @@
         <div style="font-size:11px;color:var(--muted)" id="corrSub">Cómo se relacionan los datos entre sí (últimos 30 días)</div>
       </div>
       <div id="corrList"></div>
+    </div>
+
+    <!-- Análisis de evolución -->
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div class="panel-title" id="evoTitle" style="margin-bottom:3px">Análisis de evolución</div>
+          <div style="font-size:11px;color:var(--muted)" id="evoSub">Cómo van las métricas clave con el tiempo</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="dual-btn evo-range-btn active" data-range="14" onclick="setEvoRange(14)">14 d</button>
+          <button class="dual-btn evo-range-btn" data-range="30" onclick="setEvoRange(30)">30 d</button>
+          <button class="dual-btn evo-range-btn" data-range="60" onclick="setEvoRange(60)">60 d</button>
+        </div>
+      </div>
+      <div id="evoList"></div>
     </div>
 
     <!-- Fases + caídas -->
@@ -1503,6 +1527,7 @@ async function renderDay(){
   renderSleepChart();
   runDetection();
   renderCorrelations();
+  renderEvolution();
 }
 
 // ── Signos vitales nocturnos ──────────────────────────────────────────────
@@ -1697,6 +1722,117 @@ function renderCorrelations(){
       <div class="corr-bar"><div class="corr-bar-fill" style="width:${pct}%;background:${col}"></div></div>
     </div>`;
   }).join('');
+}
+
+// ── Análisis de evolución ─────────────────────────────────────────────────
+// Analiza las métricas clave sobre un periodo y dice si van a mejor o peor,
+// comparando la primera mitad del periodo con la segunda. Se recalcula solo
+// cada vez que se cargan datos nuevos (al abrir o recargar el dashboard).
+let evoRange=14;
+function setEvoRange(n){
+  evoRange=n;
+  document.querySelectorAll('.evo-range-btn').forEach(b=>{
+    b.classList.toggle('active',parseInt(b.dataset.range)===n);
+  });
+  renderEvolution();
+}
+function renderEvolution(){
+  if(!selectedDate)return;
+  const cont=document.getElementById('evoList');
+  const dias=allDays.slice(-evoRange);
+  document.getElementById('evoSub').textContent=`Cómo van las métricas clave en los últimos ${evoRange} días (${dias.length} noches con datos)`;
+
+  // Analiza una métrica: recoge sus valores, compara primera mitad vs segunda,
+  // y decide veredicto según qué dirección es "mejor".
+  // better: 'up' (subir es bueno), 'down' (bajar es bueno)
+  function analiza(getter,better,fmt,unidad){
+    const serie=dias.map(d=>({d,v:getter(d)})).filter(x=>x.v!=null&&!isNaN(x.v));
+    if(serie.length<4)return{estado:'insuf',n:serie.length};
+    const vals=serie.map(x=>x.v);
+    const mid=Math.floor(vals.length/2);
+    const a1=vals.slice(0,mid).reduce((a,b)=>a+b,0)/mid;
+    const a2=vals.slice(mid).reduce((a,b)=>a+b,0)/(vals.length-mid);
+    const diff=a2-a1;
+    const pct=a1!==0?(diff/Math.abs(a1))*100:0;
+    const sig=Math.abs(pct)>=4; // umbral de cambio relevante
+    let veredicto='estable';
+    if(sig){
+      const mejora=(better==='up'&&diff>0)||(better==='down'&&diff<0);
+      veredicto=mejora?'mejora':'empeora';
+    }
+    return{estado:'ok',n:serie.length,a1,a2,diff,pct,veredicto,fmt,unidad,
+      primeraMedia:fmt(a1),segundaMedia:fmt(a2)};
+  }
+
+  // Las tres métricas que pediste + tipo de sueño
+  const items=[];
+
+  // 1) Caídas SpO2 <94% (menos es mejor)
+  const ev94=analiza(d=>summaries[d]?.ev94,'down',x=>Math.round(x),' caídas');
+  items.push({nombre:'Caídas de SpO2 < 94%',res:ev94,
+    txt:{mejora:'Hay menos desaturaciones por debajo del 94% que al principio del periodo. Va a mejor.',
+         empeora:'Están aumentando las desaturaciones por debajo del 94%. Conviene vigilarlo.',
+         estable:'El número de caídas por debajo del 94% se mantiene estable.'}});
+
+  // 2) SpO2 mínima (más alta es mejor)
+  const spo2min=analiza(d=>summaries[d]?.spo2_min,'up',x=>Math.round(x)+'%','');
+  items.push({nombre:'SpO2 mínima',res:spo2min,
+    txt:{mejora:'El oxígeno mínimo nocturno está subiendo. Va a mejor.',
+         empeora:'El oxígeno mínimo nocturno está bajando. Conviene vigilarlo y comentarlo con el neumólogo.',
+         estable:'El oxígeno mínimo nocturno se mantiene estable.'}});
+
+  // 3) Tiempo de sueño total (más es mejor, dentro de lo razonable)
+  const sueno=analiza(d=>summaries[d]?.sleep?.total_sleep,'up',x=>fmtH(x),'');
+  items.push({nombre:'Tiempo de sueño',res:sueno,
+    txt:{mejora:'Está durmiendo más horas que al principio del periodo. Va a mejor.',
+         empeora:'Está durmiendo menos horas. Conviene vigilar el descanso.',
+         estable:'Las horas de sueño se mantienen estables.'}});
+
+  // 4) Tipo de sueño: % de sueño profundo + REM (reparador). Más es mejor.
+  const calidad=analiza(d=>{
+    const s=summaries[d]?.sleep;
+    if(!s||!s.total_sleep)return null;
+    return ((s.deep||0)+(s.rem||0))/s.total_sleep*100;
+  },'up',x=>Math.round(x)+'%','');
+  items.push({nombre:'Calidad del sueño (profundo + REM)',res:calidad,
+    txt:{mejora:'La proporción de sueño reparador (profundo y REM) está aumentando. Va a mejor.',
+         empeora:'La proporción de sueño reparador (profundo y REM) está bajando. El descanso es menos reparador.',
+         estable:'La proporción de sueño reparador se mantiene estable.'}});
+
+  const colores={mejora:'#1D9E75',empeora:'#D94040',estable:'#6B8BAD'};
+  const iconos={mejora:'▲',empeora:'▼',estable:'='};
+  const etiqueta={mejora:'A mejor',empeora:'A peor',estable:'Estable'};
+
+  cont.innerHTML=items.map(it=>{
+    const r=it.res;
+    if(r.estado==='insuf'){
+      return `<div class="evo-item">
+        <div class="evo-head"><span class="evo-name">${it.nombre}</span>
+        <span class="evo-verdict" style="color:var(--muted);background:var(--border)">Sin datos suficientes</span></div>
+        <div class="evo-desc" style="color:var(--muted)">Se necesitan al menos 4 noches con datos en el periodo.</div>
+      </div>`;
+    }
+    const col=colores[r.veredicto];
+    const cambio=Math.abs(r.pct)>=4?` (${r.diff>0?'+':''}${Math.round(r.pct)}%)`:'';
+    return `<div class="evo-item">
+      <div class="evo-head">
+        <span class="evo-name">${it.nombre}</span>
+        <span class="evo-verdict" style="color:${col};background:${col}22">${iconos[r.veredicto]} ${etiqueta[r.veredicto]}</span>
+      </div>
+      <div class="evo-nums">Primera mitad: ${r.primeraMedia} → segunda mitad: ${r.segundaMedia}${cambio}</div>
+      <div class="evo-desc">${it.txt[r.veredicto]}</div>
+    </div>`;
+  }).join('');
+
+  // Veredicto global
+  const oks=items.map(i=>i.res).filter(r=>r.estado==='ok');
+  const mejoras=oks.filter(r=>r.veredicto==='mejora').length;
+  const empeoras=oks.filter(r=>r.veredicto==='empeora').length;
+  let icono='📊',resumen='Evolución mixta o estable';
+  if(empeoras>=2){icono='⚠️';resumen=`${empeoras} métricas empeorando`;}
+  else if(mejoras>=2&&empeoras===0){icono='✅';resumen=`${mejoras} métricas mejorando`;}
+  else if(empeoras===1){icono='🔍';resumen='1 métrica a vigilar';}
+  document.getElementById('evoTitle').textContent=`${icono} Análisis de evolución — ${resumen}`;
 }
 
 function renderVitals(){
