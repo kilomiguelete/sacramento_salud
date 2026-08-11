@@ -159,6 +159,22 @@
   .trend-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .events-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .sleep-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
+  .detection-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;}
+  .detection-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  .detection-title{font-size:14px;font-weight:700;color:var(--text);}
+  .detection-item{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px solid var(--border);}
+  .detection-item:first-child{border-top:none;}
+  .det-dot{width:9px;height:9px;border-radius:50%;margin-top:5px;flex-shrink:0;}
+  .det-text{flex:1;font-size:13px;color:var(--text);line-height:1.4;}
+  .det-text .det-detail{font-size:11px;color:var(--muted);margin-top:2px;}
+  .corr-item{padding:10px 0;border-top:1px solid var(--border);}
+  .corr-item:first-child{border-top:none;}
+  .corr-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;}
+  .corr-pair{font-size:13px;font-weight:600;color:var(--text);}
+  .corr-strength{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;white-space:nowrap;}
+  .corr-desc{font-size:12px;color:var(--muted);line-height:1.4;}
+  .corr-bar{height:5px;border-radius:3px;background:var(--border);margin-top:6px;overflow:hidden;}
+  .corr-bar-fill{height:100%;border-radius:3px;}
   @media(max-width:760px){.vitals-grid,.trends-grid{grid-template-columns:1fr;}}
   .spo2-stat-val{font-size:18px;font-weight:700;}
   .spo2-stat-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;}
@@ -229,6 +245,15 @@
         <div class="alert-title">Caída crítica de SpO2 detectada</div>
         <div class="alert-body" id="alertText"></div>
       </div>
+    </div>
+
+    <!-- Panel de detección automática -->
+    <div id="detectionPanel" class="detection-panel hidden">
+      <div class="detection-head">
+        <span id="detectionIcon" style="font-size:18px">🔍</span>
+        <span class="detection-title" id="detectionTitle">Revisión automática</span>
+      </div>
+      <div id="detectionList"></div>
     </div>
 
     <!-- Fila 1: SpO2 y respiración -->
@@ -423,6 +448,15 @@
         </div>
       </div>
       <div style="height:160px;position:relative"><canvas id="sleepChart"></canvas></div>
+    </div>
+
+    <!-- Correlaciones entre métricas -->
+    <div class="panel">
+      <div style="margin-bottom:12px">
+        <div class="panel-title" id="corrTitle" style="margin-bottom:3px">Relaciones entre métricas</div>
+        <div style="font-size:11px;color:var(--muted)" id="corrSub">Cómo se relacionan los datos entre sí (últimos 30 días)</div>
+      </div>
+      <div id="corrList"></div>
     </div>
 
     <!-- Fases + caídas -->
@@ -1467,6 +1501,8 @@ async function renderDay(){
   renderVitals();
   renderTrends();
   renderSleepChart();
+  runDetection();
+  renderCorrelations();
 }
 
 // ── Signos vitales nocturnos ──────────────────────────────────────────────
@@ -1497,6 +1533,170 @@ function sparkline(arr,color,w=120,h=32){
     <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
     <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.5" fill="${color}"/>
   </svg>`;
+}
+
+// ── Detección automática de señales de alerta ─────────────────────────────
+function runDetection(){
+  if(!selectedDate){document.getElementById('detectionPanel').classList.add('hidden');return;}
+  const s=summaries[selectedDate];
+  if(!s){document.getElementById('detectionPanel').classList.add('hidden');return;}
+  const findings=[];
+  const recent=(getter,n)=>recentValues(getter,n,selectedDate).map(p=>p.value);
+  const median=arr=>{if(!arr.length)return null;const ss=[...arr].sort((a,b)=>a-b);return ss[Math.floor(ss.length/2)];};
+
+  // 1) SpO2 mínima
+  if(s.spo2_min!=null){
+    if(s.spo2_min<88)findings.push({lvl:'alto',txt:`SpO2 mínima muy baja: ${s.spo2_min}%`,det:'Por debajo de 88%. Conviene vigilar y comentar con el neumólogo.'});
+    else if(s.spo2_min<90)findings.push({lvl:'alto',txt:`SpO2 mínima baja: ${s.spo2_min}%`,det:'Por debajo de 90%.'});
+    else if(s.spo2_min<93)findings.push({lvl:'medio',txt:`SpO2 mínima algo baja: ${s.spo2_min}%`,det:'Entre 90-92%.'});
+  }
+  // 2) Caídas <90%
+  if(s.ev90!=null&&s.ev90>0){
+    if(s.ev90>=10)findings.push({lvl:'alto',txt:`${s.ev90} caídas por debajo de 90% esta noche`,det:'Número elevado de desaturaciones.'});
+    else if(s.ev90>=4)findings.push({lvl:'medio',txt:`${s.ev90} caídas por debajo de 90% esta noche`});
+  }
+  // 3) Frecuencia respiratoria
+  const respNow=s.vitals?.respiratory_rate_avg;
+  if(respNow!=null){
+    const base=median(recent(d=>summaries[d]?.vitals?.respiratory_rate_avg,14).slice(0,-1));
+    if(respNow>20)findings.push({lvl:'alto',txt:`Frecuencia respiratoria elevada: ${Math.round(respNow)} rpm`,det:'Por encima de 20 rpm.'});
+    else if(base!=null&&respNow-base>=3)findings.push({lvl:'medio',txt:`Frecuencia respiratoria más alta de lo habitual: ${Math.round(respNow)} rpm`,det:`Su base ronda ${Math.round(base)} rpm.`});
+  }
+  // 4) Temperatura de muñeca
+  const tempNow=s.vitals?.wrist_temperature;
+  if(tempNow!=null){
+    const base=median(recent(d=>summaries[d]?.vitals?.wrist_temperature,14).slice(0,-1));
+    if(base!=null&&tempNow-base>=0.6)findings.push({lvl:'medio',txt:`Temperatura de muñeca elevada: ${tempNow.toFixed(1)}°C`,det:`+${(tempNow-base).toFixed(1)}°C sobre su base. Puede ser señal temprana de infección; vigilar los próximos días.`});
+  }
+  // 5) FC en reposo
+  const rhrNow=s.vitals?.resting_heart_rate;
+  if(rhrNow!=null){
+    const base=median(recent(d=>summaries[d]?.vitals?.resting_heart_rate,14).slice(0,-1));
+    if(base!=null&&rhrNow-base>=8)findings.push({lvl:'medio',txt:`FC en reposo más alta de lo habitual: ${Math.round(rhrNow)} bpm`,det:`Su base ronda ${Math.round(base)} bpm.`});
+  }
+  // 6) Calidad de señal SpO2
+  const spo2Count=(dayDetail[selectedDate]?.spo2||[]).length;
+  if(dayDetail[selectedDate]&&spo2Count>0&&spo2Count<6){
+    findings.push({lvl:'medio',txt:`Pocos datos de SpO2 esta noche (${spo2Count} lecturas)`,det:'La noche puede no ser representativa. Revisar ajuste de la correa.'});
+  }
+  // 7) Sueño corto
+  const ts=s.sleep?.total_sleep;
+  if(ts!=null&&ts<4)findings.push({lvl:'medio',txt:`Sueño corto: ${fmtH(ts)}`,det:'Menos de 4 horas de sueño registrado.'});
+
+  const panel=document.getElementById('detectionPanel');
+  const list=document.getElementById('detectionList');
+  panel.classList.remove('hidden');
+  const colores={alto:'#D94040',medio:'#C98B0A',ok:'#1D9E75'};
+
+  if(!findings.length){
+    document.getElementById('detectionIcon').textContent='✅';
+    document.getElementById('detectionTitle').textContent='Revisión automática — todo en orden';
+    list.innerHTML=`<div class="detection-item"><span class="det-dot" style="background:${colores.ok}"></span><div class="det-text">No se detectaron señales fuera de lo normal esta noche.</div></div>`;
+    return;
+  }
+  const hayAlto=findings.some(f=>f.lvl==='alto');
+  document.getElementById('detectionIcon').textContent=hayAlto?'⚠️':'🔍';
+  document.getElementById('detectionTitle').textContent=hayAlto
+    ? `Revisión automática — ${findings.length} señal${findings.length!==1?'es':''} a vigilar`
+    : `Revisión automática — ${findings.length} punto${findings.length!==1?'s':''} de atención`;
+  const orden={alto:0,medio:1,ok:2};
+  findings.sort((a,b)=>orden[a.lvl]-orden[b.lvl]);
+  list.innerHTML=findings.map(f=>`<div class="detection-item">
+    <span class="det-dot" style="background:${colores[f.lvl]}"></span>
+    <div class="det-text">${f.txt}${f.det?`<div class="det-detail">${f.det}</div>`:''}</div>
+  </div>`).join('');
+}
+
+// ── Correlaciones entre métricas ──────────────────────────────────────────
+// Calcula el coeficiente de correlación de Pearson entre pares de métricas
+// sobre los últimos 30 días, y describe en lenguaje llano las relaciones fuertes.
+function pearson(pairs){
+  const n=pairs.length;
+  if(n<5)return null; // pocos datos para fiarse
+  let sx=0,sy=0,sxy=0,sx2=0,sy2=0;
+  for(const[x,y]of pairs){sx+=x;sy+=y;sxy+=x*y;sx2+=x*x;sy2+=y*y;}
+  const num=n*sxy-sx*sy;
+  const den=Math.sqrt((n*sx2-sx*sx)*(n*sy2-sy*sy));
+  if(den===0)return null;
+  return num/den;
+}
+function renderCorrelations(){
+  if(!selectedDate)return;
+  const cont=document.getElementById('corrList');
+  const dias=allDays.slice(-30);
+
+  // Pares a analizar: cada uno con dos getters y un texto que explica la relación
+  // 'signo' indica cómo interpretar: si positiva/negativa es "esperable" o "a vigilar".
+  const getVal={
+    spo2min:d=>summaries[d]?.spo2_min,
+    ev90:d=>summaries[d]?.ev90,
+    resp:d=>summaries[d]?.vitals?.respiratory_rate_avg,
+    rhr:d=>summaries[d]?.vitals?.resting_heart_rate,
+    hrv:d=>summaries[d]?.vitals?.hrv_avg,
+    sueno:d=>summaries[d]?.sleep?.total_sleep,
+    perturb:d=>summaries[d]?.vitals?.breathing_disturbances,
+    temp:d=>summaries[d]?.vitals?.wrist_temperature,
+  };
+  const pares=[
+    {a:'perturb',b:'ev90',label:'Perturbaciones respiratorias ↔ caídas de SpO2',
+     pos:'Las noches con más perturbaciones respiratorias tienden a tener más caídas de oxígeno.',
+     neg:'Curiosamente, más perturbaciones no se asocian a más caídas de oxígeno.'},
+    {a:'sueno',b:'spo2min',label:'Horas de sueño ↔ SpO2 mínima',
+     pos:'Cuanto más duerme, mejor es su oxígeno mínimo.',
+     neg:'Dormir más se asocia a peor oxígeno mínimo (revisar si duerme en mala postura).'},
+    {a:'resp',b:'ev90',label:'Frecuencia respiratoria ↔ caídas de SpO2',
+     pos:'Las noches de respiración más rápida coinciden con más caídas de oxígeno.',
+     neg:'La respiración más rápida no se asocia a más caídas de oxígeno.'},
+    {a:'sueno',b:'hrv',label:'Horas de sueño ↔ recuperación (VFC)',
+     pos:'Cuanto más duerme, mejor es su recuperación al día siguiente.',
+     neg:'Dormir más no se traduce en mejor recuperación estos días.'},
+    {a:'rhr',b:'spo2min',label:'FC en reposo ↔ SpO2 mínima',
+     pos:'FC en reposo más alta coincide con mejor oxígeno (poco habitual).',
+     neg:'Las noches de FC en reposo más alta tienden a tener peor oxígeno mínimo.'},
+    {a:'temp',b:'resp',label:'Temperatura ↔ frecuencia respiratoria',
+     pos:'Temperatura y respiración suben juntas (posible señal de infección si se mantiene).',
+     neg:'Temperatura y respiración no se mueven juntas.'},
+  ];
+
+  const resultados=[];
+  for(const p of pares){
+    const pairs=[];
+    for(const d of dias){
+      const x=getVal[p.a](d), y=getVal[p.b](d);
+      if(x!=null&&!isNaN(x)&&y!=null&&!isNaN(y))pairs.push([x,y]);
+    }
+    const r=pearson(pairs);
+    if(r==null)continue;
+    resultados.push({...p,r,n:pairs.length});
+  }
+
+  // Ordenar por fuerza de la correlación (valor absoluto)
+  resultados.sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+
+  // Solo mostrar relaciones con cierta fuerza (|r| >= 0.3)
+  const fuertes=resultados.filter(x=>Math.abs(x.r)>=0.3);
+  document.getElementById('corrSub').textContent=`Cómo se relacionan los datos entre sí (últimos 30 días, ${dias.length} noches)`;
+
+  if(!fuertes.length){
+    cont.innerHTML=`<div style="font-size:13px;color:var(--muted);padding:6px 0">No se detectan relaciones claras entre las métricas en este periodo. Esto es normal y puede cambiar con más datos.</div>`;
+    return;
+  }
+
+  cont.innerHTML=fuertes.map(x=>{
+    const abs=Math.abs(x.r);
+    const fuerza=abs>=0.6?'fuerte':abs>=0.45?'moderada':'leve';
+    const col=abs>=0.6?'#1D9E75':abs>=0.45?'#C98B0A':'#6B8BAD';
+    const desc=x.r>0?x.pos:x.neg;
+    const pct=Math.round(abs*100);
+    return `<div class="corr-item">
+      <div class="corr-head">
+        <span class="corr-pair">${x.label}</span>
+        <span class="corr-strength" style="color:${col};background:${col}22">relación ${fuerza}</span>
+      </div>
+      <div class="corr-desc">${desc}</div>
+      <div class="corr-bar"><div class="corr-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+    </div>`;
+  }).join('');
 }
 
 function renderVitals(){
@@ -2513,6 +2713,50 @@ async function generatePDF(){
       doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(...GRAY2);doc.text(l,cx,y+20,{align:'center'});
     });
     y+=36;
+    // ── Resumen clínico (promedios y tendencias del período) ──
+    setProgress(15,'Resumen clínico…');
+    stitle('Resumen clínico del período');
+    // Calcular promedios de las métricas clave sobre el período
+    const avg=(getter)=>{const v=days.map(getter).filter(x=>x!=null&&!isNaN(x));return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;};
+    const spo2MinAvg=avg(d=>summaries[d]?.spo2_min);
+    const spo2MinWorst=Math.min(...days.map(d=>summaries[d]?.spo2_min).filter(x=>x!=null));
+    const ev90Total=days.reduce((a,d)=>a+(summaries[d]?.ev90||0),0);
+    const respAvg=avg(d=>summaries[d]?.vitals?.respiratory_rate_avg);
+    const rhrAvg=avg(d=>summaries[d]?.vitals?.resting_heart_rate);
+    const hrvAvg=avg(d=>summaries[d]?.vitals?.hrv_avg);
+    const suenoAvg=avg(d=>summaries[d]?.sleep?.total_sleep);
+    const tempAvg=avg(d=>summaries[d]?.vitals?.wrist_temperature);
+    // Tendencia: comparar primera mitad con segunda mitad del período
+    const trend=(getter)=>{
+      const v=days.map(getter).filter(x=>x!=null&&!isNaN(x));
+      if(v.length<4)return '';
+      const mid=Math.floor(v.length/2);
+      const a1=v.slice(0,mid).reduce((a,b)=>a+b,0)/mid;
+      const a2=v.slice(mid).reduce((a,b)=>a+b,0)/(v.length-mid);
+      const diff=a2-a1;const pct=a1!==0?Math.abs(diff/a1*100):0;
+      if(pct<3)return '= estable';
+      return diff>0?'^ subiendo':'v bajando';
+    };
+    const filas=[
+      ['SpO2 mínima (media)',spo2MinAvg!=null?Math.round(spo2MinAvg)+'%':'–',trend(d=>summaries[d]?.spo2_min),spo2MinAvg!=null&&spo2MinAvg<92?ORANGE:GREEN],
+      ['SpO2 mínima (peor noche)',isFinite(spo2MinWorst)?spo2MinWorst+'%':'–','',isFinite(spo2MinWorst)&&spo2MinWorst<90?RED:BLACK],
+      ['Caídas <90% (total período)',ev90Total+'',trend(d=>summaries[d]?.ev90),ev90Total>0?ORANGE:GREEN],
+      ['Frec. respiratoria (media)',respAvg!=null?Math.round(respAvg)+' rpm':'–',trend(d=>summaries[d]?.vitals?.respiratory_rate_avg),respAvg!=null&&respAvg>20?ORANGE:BLACK],
+      ['FC en reposo (media)',rhrAvg!=null?Math.round(rhrAvg)+' bpm':'–',trend(d=>summaries[d]?.vitals?.resting_heart_rate),BLACK],
+      ['VFC (media)',hrvAvg!=null?Math.round(hrvAvg)+' ms':'–',trend(d=>summaries[d]?.vitals?.hrv_avg),BLACK],
+      ['Sueño total (media)',suenoAvg!=null?fmtH(suenoAvg):'–',trend(d=>summaries[d]?.sleep?.total_sleep),BLACK],
+      ['Temp. muñeca (media)',tempAvg!=null?tempAvg.toFixed(1)+' °C':'–',trend(d=>summaries[d]?.vitals?.wrist_temperature),BLACK],
+    ];
+    doc.setFontSize(8);
+    filas.forEach((f,i)=>{
+      cy(7);
+      if(i%2===0){doc.setFillColor(248,248,248);doc.rect(mg,y-4,cW,6,'F');}
+      doc.setFont('helvetica','normal');doc.setTextColor(...GRAY1);doc.text(f[0],mg+3,y);
+      doc.setFont('helvetica','bold');doc.setTextColor(...f[3]);doc.text(f[1],mg+90,y);
+      doc.setFont('helvetica','normal');doc.setTextColor(...GRAY2);doc.text(f[2],mg+120,y);
+      y+=6;
+    });
+    y+=6;
     setProgress(20,'Tabla resumen…');
     stitle('Resumen por noche');
     const TC={a:0,b:33,c:49,d:63,e:78,f:94,g:110,h:127,i:143,j:159};
