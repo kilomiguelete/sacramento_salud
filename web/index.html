@@ -176,6 +176,7 @@
   .corr-bar{height:5px;border-radius:3px;background:var(--border);margin-top:6px;overflow:hidden;}
   .corr-bar-fill{height:100%;border-radius:3px;}
   .evo-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
+  .spo2min-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .evo-item{padding:12px 0;border-top:1px solid var(--border);}
   .evo-item:first-child{border-top:none;}
   .evo-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;}
@@ -450,8 +451,9 @@
           <div style="font-size:11px;color:var(--muted)" id="sleepChartSub">Horas de sueño por noche</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <button class="dual-btn sleep-range-btn active" data-range="7" onclick="setSleepRange(7)">7 días</button>
-          <button class="dual-btn sleep-range-btn" data-range="month" onclick="setSleepRange('month')">Mes</button>
+          <button class="dual-btn sleep-range-btn active" data-range="7" onclick="setSleepRange(7)">7 d</button>
+          <button class="dual-btn sleep-range-btn" data-range="30" onclick="setSleepRange(30)">30 d</button>
+          <button class="dual-btn sleep-range-btn" data-range="90" onclick="setSleepRange(90)">90 d</button>
           <button class="dual-btn" onclick="downloadSleepCSV()" style="padding:3px 10px">↓ CSV</button>
         </div>
       </div>
@@ -504,11 +506,16 @@
       </div>
     </div>
 
-    <!-- SpO2 mensual -->
+    <!-- SpO2 mínimo -->
     <div class="panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div class="panel-title" id="monthChartTitle" style="margin-bottom:0">SpO2 mínimo — mes</div>
-        <button class="dual-btn" onclick="downloadMonthCSV()" style="padding:3px 10px">↓ CSV</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div class="panel-title" id="monthChartTitle" style="margin-bottom:0">SpO2 mínimo — últimos 7 días</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="dual-btn spo2min-range-btn active" data-range="7" onclick="setSpo2MinRange(7)">7 d</button>
+          <button class="dual-btn spo2min-range-btn" data-range="30" onclick="setSpo2MinRange(30)">30 d</button>
+          <button class="dual-btn spo2min-range-btn" data-range="90" onclick="setSpo2MinRange(90)">90 d</button>
+          <button class="dual-btn" onclick="downloadMonthCSV()" style="padding:3px 10px">↓ CSV</button>
+        </div>
       </div>
       <div style="height:110px;position:relative"><canvas id="spo2MonthChart"></canvas></div>
     </div>
@@ -1491,17 +1498,8 @@ async function renderDay(){
   // Caídas SpO2 (rango configurable: 30/60/90 días)
   renderEventsChart();
 
-  // SpO2 mensual
-  const mDays=monthsMap[selectedMonth]||[];
-  const mSpo2=mDays.map(d=>summaries[d]?.spo2_min??null);
-  dc('spo2Month');
-  document.getElementById('monthChartTitle').textContent=`SpO2 mínimo — ${fmtMonthLabel(selectedMonth)}`;
-  charts.spo2Month=new Chart(document.getElementById('spo2MonthChart'),{
-    type:'bar',
-    data:{labels:mDays.map(d=>new Date(prevDate(d)+'T12:00:00').getDate()),datasets:[{label:'SpO2 mín',data:mSpo2,backgroundColor:mSpo2.map(v=>sc(v)+'CC'),borderColor:mSpo2.map(v=>sc(v)),borderWidth:1,borderRadius:3}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:axisColor(),font:{size:9}},grid:{display:false}},y:{min:75,max:100,ticks:{color:axisColor(),font:{size:9}},grid:{color:gridColor()}}}},
-    plugins:[rlPlugin('rl2',[[94,'#C98B0A'],[90,'#D94040']])]
-  });
+  // SpO2 mínimo (rango configurable: 7/30/90 días)
+  renderSpo2MinChart();
 
   // Resumen del mes
   renderMonthSummary();
@@ -1977,6 +1975,36 @@ function renderEventsChart(){
 }
 
 // ── Sueño total (7 días / mensual) ────────────────────────────────────────
+// ── SpO2 mínimo (7/30/90 días) ────────────────────────────────────────────
+let spo2MinRange=7;
+function setSpo2MinRange(n){
+  spo2MinRange=n;
+  document.querySelectorAll('.spo2min-range-btn').forEach(b=>{
+    b.classList.toggle('active',parseInt(b.dataset.range)===n);
+  });
+  renderSpo2MinChart();
+}
+function renderSpo2MinChart(){
+  if(!selectedDate)return;
+  const rd=allDays.slice(-spo2MinRange);
+  const data=rd.map(d=>summaries[d]?.spo2_min??null);
+  dc('spo2Month');
+  document.getElementById('monthChartTitle').textContent=`SpO2 mínimo — últimos ${spo2MinRange} días`;
+  const maxTicks=spo2MinRange<=7?7:spo2MinRange<=30?12:14;
+  charts.spo2Month=new Chart(document.getElementById('spo2MonthChart'),{
+    type:'bar',
+    data:{labels:rd.map(d=>fmtDateShort(prevDate(d))),datasets:[{label:'SpO2 mín',data,backgroundColor:data.map(v=>sc(v)+'CC'),borderColor:data.map(v=>sc(v)),borderWidth:1,borderRadius:2}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items[0].label,label:ctx=>ctx.parsed.y!=null?`SpO2 mín: ${ctx.parsed.y}%`:'Sin dato'}}},scales:{x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:maxTicks,maxRotation:0,minRotation:0,autoSkip:true},grid:{display:false}},y:{min:75,max:100,ticks:{color:axisColor(),font:{size:9},callback:v=>v+'%'},grid:{color:gridColor()}}}},
+    plugins:[rlPlugin('rl2',[[94,'#C98B0A'],[90,'#D94040']])]
+  });
+}
+function downloadMonthCSV(){
+  const rd=allDays.slice(-spo2MinRange);
+  const rows=[['Noche del','SpO2 mín (%)','SpO2 prom (%)','Caídas <94%','Caídas <90%']];
+  rd.forEach(d=>{const s=summaries[d];rows.push([prevDate(d),s?.spo2_min??'',s?.spo2_avg??'',s?.ev94??'',s?.ev90??'']);});
+  downloadCSVFile(rows,`spo2-minimo-${spo2MinRange}dias.csv`);
+}
+
 let sleepRange=7;
 function setSleepRange(r){
   sleepRange=r;
@@ -1987,15 +2015,9 @@ function setSleepRange(r){
 }
 function renderSleepChart(){
   if(!selectedDate)return;
-  // Días a mostrar: últimos 7 hasta selectedDate, o todo el mes seleccionado
-  let rd;
-  if(sleepRange==='month'){
-    rd=monthsMap[selectedMonth]||[];
-    document.getElementById('sleepChartTitle').textContent=`Sueño total — ${fmtMonthLabel(selectedMonth)}`;
-  }else{
-    rd=allDays.slice(-7);
-    document.getElementById('sleepChartTitle').textContent='Sueño total — últimos 7 días';
-  }
+  // Días a mostrar: últimos N hasta selectedDate
+  const rd=allDays.slice(-sleepRange);
+  document.getElementById('sleepChartTitle').textContent=`Sueño total — últimos ${sleepRange} días`;
   const data=rd.map(d=>summaries[d]?.sleep?.total_sleep??null);
   // Media de las noches con dato (para subtítulo y línea de referencia)
   const valid=data.filter(v=>v!=null);
@@ -2006,7 +2028,7 @@ function renderSleepChart(){
 
   // Color por calidad de duración: <6h ámbar, <5h rojo, ≥7h verde fuerte
   const barColor=v=>v==null?gridColor():v<5?'rgba(217,64,64,.65)':v<6?'rgba(201,139,10,.6)':v>=7?'rgba(29,158,117,.6)':'rgba(122,110,232,.55)';
-  const maxTicks=sleepRange==='month'?12:7;
+  const maxTicks=sleepRange<=7?7:sleepRange<=30?12:14;
 
   dc('sleep');
   charts.sleep=new Chart(document.getElementById('sleepChart'),{
@@ -2033,13 +2055,10 @@ function renderSleepChart(){
   });
 }
 function downloadSleepCSV(){
-  let rd;
-  if(sleepRange==='month'){rd=monthsMap[selectedMonth]||[];}
-  else{rd=allDays.slice(-7);}
+  const rd=allDays.slice(-sleepRange);
   const rows=[['Noche del','Sueño total (h)','Profundo (h)','REM (h)','Ligero (h)','Despierto (h)']];
   rd.forEach(d=>{const s=summaries[d]?.sleep;rows.push([prevDate(d),s?.total_sleep??'',s?.deep??'',s?.rem??'',s?.core??'',s?.awake??'']);});
-  const nombre=sleepRange==='month'?`sueno-${selectedMonth}.csv`:`sueno-7dias.csv`;
-  downloadCSVFile(rows,nombre);
+  downloadCSVFile(rows,`sueno-${sleepRange}dias.csv`);
 }
 
 // ── Resumen del mes ───────────────────────────────────────────────────────
@@ -2613,13 +2632,6 @@ function downloadEventsCSV(){
 }
 
 // SpO2 mínimo del mes
-function downloadMonthCSV(){
-  const mDays=monthsMap[selectedMonth]||[];
-  const rows=[['Noche del','SpO2 mín (%)','SpO2 prom (%)','Caídas <94%','Caídas <90%']];
-  mDays.forEach(d=>{const s=summaries[d];rows.push([prevDate(d),s?.spo2_min??'',s?.spo2_avg??'',s?.ev94??'',s?.ev90??'']);});
-  downloadCSVFile(rows,`spo2-mensual-${selectedMonth}.csv`);
-}
-
 // ── Exportador CSV personalizado ──────────────────────────────────────────
 let csvSelectedRange=null;
 let csvGranularity='daily';
