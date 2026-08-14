@@ -240,6 +240,7 @@
       <div>
         <div class="score-night" id="scoreNightLabel">–</div>
         <div style="font-size:10px;color:var(--muted);margin-top:3px" id="scoreComponents">–</div>
+        <div style="font-size:10px;margin-top:4px;display:none" id="scoreReliability"></div>
       </div>
       <div class="score-badge">
         <div>
@@ -960,6 +961,18 @@ function computeT(spo2Sleep, threshold){
   return Math.round((below/spo2Sleep.length)*100*10)/10;
 }
 
+// ── Configuración personalizada para Sacramento ───────────────────────────
+// Ajusta estos valores a lo que su neumólogo considere normal PARA ELLA.
+// Al tener un solo pulmón, su base de SpO2 puede ser algo más baja que la
+// población general; personalizar aquí evita que el score la penalice de más.
+const PERFIL={
+  // SpO2 mínima que se considera aceptable para ella (por debajo = preocupante).
+  // La puntuación de SpO2 se mide como distancia a este objetivo, no a 100%.
+  spo2MinObjetivo: 92,     // referencia "buena" de SpO2 mínima nocturna
+  // Nº mínimo de lecturas de SpO2 para fiarse del score de esa noche.
+  minLecturasFiable: 6,
+};
+
 // Puntuación de noche 0–10 (mayor = mejor)
 function computeScore({spo2Min,odi,t90,breathDist,sleepEff,deepRemPct}){
   function rate(v,thresholds){
@@ -967,7 +980,10 @@ function computeScore({spo2Min,odi,t90,breathDist,sleepEff,deepRemPct}){
     for(const[thresh,score]of thresholds){if(v<=thresh)return score;}
     return thresholds[thresholds.length-1][1];
   }
-  const s1=rate(spo2Min==null?null:100-spo2Min,[[2,10],[4,8],[6,6],[8,4],[10,2],[Infinity,0]]);
+  // SpO2: distancia respecto al objetivo personalizado. Si su objetivo es 92 y
+  // esa noche bajó a 92, saca la máxima; cuanto más por debajo, peor.
+  const spo2Gap=spo2Min==null?null:PERFIL.spo2MinObjetivo-spo2Min;
+  const s1=rate(spo2Gap,[[0,10],[2,8],[4,6],[6,4],[8,2],[Infinity,0]]);
   const s2=rate(odi,[[2,10],[5,8],[10,6],[20,4],[30,2],[Infinity,0]]);
   const s3=rate(t90,[[0,10],[0.5,8],[1,6],[2,4],[5,2],[Infinity,0]]);
   const s4=rate(breathDist,[[5,10],[10,8],[15,6],[20,4],[30,2],[Infinity,0]]);
@@ -1647,7 +1663,7 @@ function runDetection(){
   }
   // 6) Calidad de señal SpO2
   const spo2Count=(dayDetail[selectedDate]?.spo2||[]).length;
-  if(dayDetail[selectedDate]&&spo2Count>0&&spo2Count<6){
+  if(dayDetail[selectedDate]&&spo2Count>0&&spo2Count<PERFIL.minLecturasFiable){
     findings.push({lvl:'medio',txt:`Pocos datos de SpO2 esta noche (${spo2Count} lecturas)`,det:'La noche puede no ser representativa. Revisar ajuste de la correa.'});
   }
   // 7) Sueño corto
@@ -2224,6 +2240,27 @@ function showScore(score,pd,odi,t90){
   const effEl=document.getElementById('valEfficiency');
   const effTxt=effEl.textContent&&effEl.textContent!=='–'?`Efic. sueño: ${effEl.textContent}`:'';
   document.getElementById('scoreComponents').textContent=[odiTxt,t90Txt,effTxt].filter(Boolean).join(' · ')||'Calculando…';
+
+  // Aviso de fiabilidad: si la noche tiene pocas lecturas de SpO2, el score
+  // se calcula sobre muy pocos datos y no es de fiar.
+  const relEl=document.getElementById('scoreReliability');
+  const dd=dayDetail[selectedDate];
+  if(dd&&odi!=='…'){ // solo cuando ya está el detalle cargado
+    const s=summaries[selectedDate];
+    const sleep=s?.sleep;
+    const ss=(sleep?.sleep_start?localTime(sleep.sleep_start):undefined);
+    const se=(sleep?.sleep_end?localTime(sleep.sleep_end):undefined);
+    const nLecturas=filterNight(dd.spo2||[],ss,se).length;
+    if(nLecturas>0&&nLecturas<PERFIL.minLecturasFiable){
+      relEl.style.display='block';
+      relEl.style.color='#E07840';
+      relEl.textContent=`⚠ Puntuación poco fiable: solo ${nLecturas} lecturas de SpO2 esta noche`;
+    }else{
+      relEl.style.display='none';
+    }
+  }else{
+    relEl.style.display='none';
+  }
 }
 
 // ── FC 24 horas con detección de picos atípicos ──────────────────────────
