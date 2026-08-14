@@ -983,6 +983,29 @@ function scoreLabel(s){
   if(s>=2)return{label:'Preocupante',color:'#E07840'};
   return{label:'Crítica',color:'#D94040'};
 }
+// Puntuación aproximada de una noche a partir de los datos ya agregados en
+// summaries (sin cargar el detalle). Se usa para el color del punto del
+// calendario, de modo que coincida con la etiqueta de calidad al abrir el día.
+function summaryScore(d){
+  const s=summaries[d];
+  if(!s)return null;
+  const sleep=s.sleep, v=s.vitals;
+  // Necesitamos al menos SpO2 o sueño para dar una puntuación
+  if(s.spo2_min==null && !sleep)return null;
+  const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
+  const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
+  const deepRemPct=sleep?.total_sleep>0?Math.round(((sleep.deep||0)+(sleep.rem||0))/sleep.total_sleep*100):null;
+  // ev90 (caídas <90% en la noche) sirve como proxy del ODI; t90 no está
+  // pre-agregado, así que se omite (rate() le asigna 5 neutro).
+  return computeScore({
+    spo2Min:s.spo2_min,
+    odi:s.ev90!=null?s.ev90:null,
+    t90:null,
+    breathDist:v?.breathing_disturbances,
+    sleepEff:eff,
+    deepRemPct
+  });
+}
 function odiLabel(v){
   if(v==null)return'–';
   if(v<5)return'Normal (<5)';
@@ -1100,7 +1123,7 @@ function renderDays(){
     const btn=document.createElement('button');
     btn.className='day-pill'+(ds===selectedDate?' active':'')+(!has?' no-data':'');
     btn.title=esParcial?`Noche del ${fmtDateShort(prevDate(ds))} al ${fmtDateShort(ds)} · FC del día disponible, noche pendiente`:has?`Noche del ${fmtDateShort(prevDate(ds))} al ${fmtDateShort(ds)} · Doble clic = forzar recarga`:'Sin datos';
-    const dotColor=esParcial?'#6B8BAD':has?sc(s?.spo2_min):'#1E3048';
+    const dotColor=esParcial?'#6B8BAD':has?scoreLabel(summaryScore(ds)).color:'#1E3048';
     btn.innerHTML=`<span class="day-wd">${dayWd(ds)}</span><span class="day-num">${d}</span><span class="day-dot" style="background:${dotColor}"></span>`;
     if(has){btn.onclick=()=>selectDay(ds);btn.ondblclick=()=>selectDay(ds,true);}
     el.appendChild(btn);
