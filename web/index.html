@@ -178,6 +178,7 @@
   .corr-bar-fill{height:100%;border-radius:3px;}
   .evo-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .spo2min-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
+  .score-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .evo-item{padding:12px 0;border-top:1px solid var(--border);}
   .evo-item:first-child{border-top:none;}
   .evo-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;}
@@ -248,6 +249,26 @@
           <div class="score-num" id="scoreNum" style="text-align:right">–</div>
         </div>
       </div>
+    </div>
+
+    <!-- Evolución de la puntuación -->
+    <div class="panel" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div class="panel-title" id="scoreChartTitle" style="margin-bottom:3px">Evolución de la puntuación — últimos 7 días</div>
+          <div style="font-size:11px;color:var(--muted)" id="scoreChartSub">Puntuación de cada noche (0–10)</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <button class="dual-btn score-range-btn active" data-range="7" onclick="setScoreRange(7)">7 d</button>
+          <button class="dual-btn score-range-btn" data-range="14" onclick="setScoreRange(14)">14 d</button>
+          <button class="dual-btn score-range-btn" data-range="30" onclick="setScoreRange(30)">30 d</button>
+          <button class="dual-btn score-range-btn" data-range="60" onclick="setScoreRange(60)">60 d</button>
+          <button class="dual-btn score-range-btn" data-range="90" onclick="setScoreRange(90)">90 d</button>
+          <button class="dual-btn score-range-btn" data-range="180" onclick="setScoreRange(180)">180 d</button>
+          <button class="dual-btn score-range-btn" data-range="360" onclick="setScoreRange(360)">360 d</button>
+        </div>
+      </div>
+      <div style="height:150px;position:relative"><canvas id="scoreChart"></canvas></div>
     </div>
 
     <!-- Alerta crítica -->
@@ -1587,6 +1608,7 @@ async function renderDay(){
   renderVitals();
   renderTrends();
   renderSleepChart();
+  renderScoreChart();
   runDetection();
   renderCorrelations();
   renderEvolution();
@@ -2067,6 +2089,55 @@ function downloadMonthCSV(){
   const rows=[['Noche del','SpO2 mín (%)','SpO2 prom (%)','Caídas <94%','Caídas <90%']];
   rd.forEach(d=>{const s=summaries[d];rows.push([prevDate(d),s?.spo2_min??'',s?.spo2_avg??'',s?.ev94??'',s?.ev90??'']);});
   downloadCSVFile(rows,`spo2-minimo-${spo2MinRange}dias.csv`);
+}
+
+// ── Evolución de la puntuación de noche ───────────────────────────────────
+let scoreRange=7;
+function setScoreRange(n){
+  scoreRange=n;
+  document.querySelectorAll('.score-range-btn').forEach(b=>{
+    b.classList.toggle('active',parseInt(b.dataset.range)===n);
+  });
+  renderScoreChart();
+}
+function renderScoreChart(){
+  if(!selectedDate)return;
+  const rd=allDays.slice(-scoreRange);
+  document.getElementById('scoreChartTitle').textContent=`Evolución de la puntuación — últimos ${scoreRange} días`;
+  const data=rd.map(d=>summaryScore(d));
+  const valid=data.filter(v=>v!=null);
+  const avg=valid.length?valid.reduce((a,b)=>a+b,0)/valid.length:null;
+  document.getElementById('scoreChartSub').textContent=avg!=null
+    ?`Puntuación de cada noche (0–10) · media ${avg.toFixed(1)}`
+    :'Puntuación de cada noche (0–10)';
+
+  // Color de cada barra según la misma escala que la etiqueta de calidad
+  const barColor=v=>v==null?gridColor():scoreLabel(v).color;
+  const maxTicks=scoreRange<=7?7:scoreRange<=30?12:scoreRange<=90?14:scoreRange<=180?16:18;
+
+  dc('score');
+  charts.score=new Chart(document.getElementById('scoreChart'),{
+    type:'bar',
+    data:{labels:rd.map(d=>fmtDateShort(prevDate(d))),datasets:[{label:'Puntuación',data,backgroundColor:data.map(barColor),borderRadius:3}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{title:items=>items[0].label,label:ctx=>ctx.parsed.y!=null?`${ctx.parsed.y}/10 · ${scoreLabel(ctx.parsed.y).label}`:'Sin dato'}},
+      },
+      scales:{
+        x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:maxTicks,maxRotation:0,minRotation:0,autoSkip:true},grid:{display:false}},
+        y:{min:0,max:10,ticks:{color:axisColor(),font:{size:9},stepSize:2},grid:{color:gridColor()}},
+      }
+    },
+    plugins:[{id:'scoreRefLine',afterDraw(ch){
+      if(avg==null)return;
+      const{ctx,chartArea:{left,right},scales:{y}}=ch;
+      const yp=y.getPixelForValue(avg);
+      ctx.save();ctx.strokeStyle=axisColor();ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.globalAlpha=.6;
+      ctx.beginPath();ctx.moveTo(left,yp);ctx.lineTo(right,yp);ctx.stroke();ctx.restore();
+    }}]
+  });
 }
 
 let sleepRange=7;
