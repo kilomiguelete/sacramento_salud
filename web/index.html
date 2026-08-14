@@ -179,6 +179,9 @@
   .evo-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .spo2min-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .score-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
+  .score-reading{margin-top:12px;padding:12px 14px;border-radius:10px;background:var(--bg);border-left:3px solid var(--border);font-size:13px;line-height:1.5;color:var(--text);}
+  .score-reading .sr-head{font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px;}
+  .score-reading .sr-detail{font-size:12px;color:var(--muted);margin-top:4px;}
   .evo-item{padding:12px 0;border-top:1px solid var(--border);}
   .evo-item:first-child{border-top:none;}
   .evo-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;}
@@ -269,6 +272,7 @@
         </div>
       </div>
       <div style="height:150px;position:relative"><canvas id="scoreChart"></canvas></div>
+      <div id="scoreReading" class="score-reading"></div>
     </div>
 
     <!-- Alerta crítica -->
@@ -2171,6 +2175,81 @@ function renderScoreChart(){
       ctx.beginPath();ctx.moveTo(left,yp);ctx.lineTo(right,yp);ctx.stroke();ctx.restore();
     }}]
   });
+
+  // ── Lectura interpretativa de la evolución en el periodo ──
+  renderScoreReading(valid,rd,data,avg);
+}
+
+// Genera un texto que explica cómo ha ido la evolución en el periodo mostrado.
+function renderScoreReading(valid,rd,data,avg){
+  const el=document.getElementById('scoreReading');
+  if(!valid||valid.length<3){
+    el.innerHTML=`<div class="sr-detail">No hay suficientes noches con datos en este periodo para valorar la evolución (se necesitan al menos 3).</div>`;
+    el.style.borderLeftColor='var(--border)';
+    return;
+  }
+
+  // Tendencia: comparar primera mitad con segunda mitad del periodo
+  const mid=Math.floor(valid.length/2);
+  const a1=valid.slice(0,mid).reduce((a,b)=>a+b,0)/mid;
+  const a2=valid.slice(mid).reduce((a,b)=>a+b,0)/(valid.length-mid);
+  const diff=a2-a1;
+  const pct=a1!==0?(diff/a1)*100:0;
+  const sig=Math.abs(diff)>=0.4; // umbral de cambio relevante (0.4 puntos)
+
+  // Recuento por categorías
+  const malas=valid.filter(v=>v<4).length;      // Preocupante/Crítica
+  const regulares=valid.filter(v=>v>=4&&v<6).length;
+  const buenas=valid.filter(v=>v>=6).length;
+  const pctMalas=Math.round(malas/valid.length*100);
+
+  // Nivel general según la media
+  const nivelLabel=scoreLabel(avg).label;
+  const nivelColor=scoreLabel(avg).color;
+
+  // Construir veredicto de tendencia
+  let tendIcon,tendTxt,tendColor;
+  if(!sig){
+    tendIcon='→';tendColor='#6B8BAD';
+    tendTxt='se ha mantenido estable';
+  }else if(diff>0){
+    tendIcon='▲';tendColor='#1D9E75';
+    tendTxt=`ha mejorado (${diff>0?'+':''}${diff.toFixed(1)} puntos de media)`;
+  }else{
+    tendIcon='▼';tendColor='#D94040';
+    tendTxt=`ha empeorado (${diff.toFixed(1)} puntos de media)`;
+  }
+
+  // Frase principal combinando nivel + tendencia
+  let titulo, resumen, borde;
+  if(avg>=6&&(!sig||diff>=0)){
+    titulo='Periodo bueno';borde='#1D9E75';
+    resumen=`En estos ${valid.length} días con datos, la calidad del sueño ha sido buena (media ${avg.toFixed(1)}/10) y ${tendTxt}.`;
+  }else if(avg<4){
+    titulo='Periodo preocupante';borde='#D94040';
+    resumen=`En estos ${valid.length} días, la calidad ha sido baja (media ${avg.toFixed(1)}/10, "${nivelLabel}") y ${tendTxt}. Conviene comentarlo con el neumólogo.`;
+  }else if(sig&&diff<0){
+    titulo='Empeorando';borde='#E07840';
+    resumen=`La calidad media es ${avg.toFixed(1)}/10 ("${nivelLabel}"), pero ${tendTxt} a lo largo del periodo. Conviene vigilar.`;
+  }else if(sig&&diff>0){
+    titulo='Mejorando';borde='#1D9E75';
+    resumen=`La calidad media es ${avg.toFixed(1)}/10 ("${nivelLabel}") y ${tendTxt}. Buena señal.`;
+  }else{
+    titulo='Periodo estable';borde='#C98B0A';
+    resumen=`La calidad media es ${avg.toFixed(1)}/10 ("${nivelLabel}") y ${tendTxt}.`;
+  }
+
+  // Detalle con recuento y peor/mejor noche
+  let peorIdx=-1,peorVal=99,mejorIdx=-1,mejorVal=-1;
+  data.forEach((v,i)=>{if(v!=null){if(v<peorVal){peorVal=v;peorIdx=i;}if(v>mejorVal){mejorVal=v;mejorIdx=i;}}});
+  const peorFecha=peorIdx>=0?fmtDateShort(prevDate(rd[peorIdx])):'';
+  const detalle=`De ${valid.length} noches: ${buenas} buenas, ${regulares} regulares y ${malas} malas${malas>0?` (${pctMalas}%)`:''}.`+
+    (peorIdx>=0?` Peor noche: ${peorFecha} (${peorVal}/10).`:'');
+
+  el.style.borderLeftColor=borde;
+  el.innerHTML=`<div class="sr-head" style="color:${borde}"><span>${tendIcon}</span>${titulo}</div>
+    <div>${resumen}</div>
+    <div class="sr-detail">${detalle}</div>`;
 }
 
 let sleepRange=7;
