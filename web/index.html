@@ -992,25 +992,58 @@ const PERFIL={
   spo2MinObjetivo: 92,     // referencia "buena" de SpO2 mínima nocturna
   // Nº mínimo de lecturas de SpO2 para fiarse del score de esa noche.
   minLecturasFiable: 6,
+  // Topes de seguridad: si la SpO2 mínima baja de estos umbrales, la nota de
+  // la noche NO puede superar el valor indicado, aunque el resto esté bien.
+  // Así una caída grave arrastra toda la noche, como debe ser clínicamente.
+  topeSpo2: [
+    {min: 85, notaMax: 2},   // SpO2 <85% -> como mucho "Preocupante" bajo / Crítica
+    {min: 88, notaMax: 3.5}, // SpO2 <88% -> como mucho "Preocupante"
+    {min: 90, notaMax: 5},   // SpO2 <90% -> como mucho "Regular"
+  ],
 };
 
 // Puntuación de noche 0–10 (mayor = mejor)
 function computeScore({spo2Min,odi,t90,breathDist,sleepEff,deepRemPct}){
+  // rate() ahora devuelve null (no 5) cuando falta el dato, para poder
+  // EXCLUIRLO del cálculo y repartir su peso, en vez de inflar la nota.
   function rate(v,thresholds){
-    if(v==null)return 5;
+    if(v==null)return null;
     for(const[thresh,score]of thresholds){if(v<=thresh)return score;}
     return thresholds[thresholds.length-1][1];
   }
-  // SpO2: distancia respecto al objetivo personalizado. Si su objetivo es 92 y
-  // esa noche bajó a 92, saca la máxima; cuanto más por debajo, peor.
+  // SpO2: distancia respecto al objetivo personalizado (umbrales más severos).
   const spo2Gap=spo2Min==null?null:PERFIL.spo2MinObjetivo-spo2Min;
-  const s1=rate(spo2Gap,[[0,10],[2,8],[4,6],[6,4],[8,2],[Infinity,0]]);
-  const s2=rate(odi,[[2,10],[5,8],[10,6],[20,4],[30,2],[Infinity,0]]);
+  const s1=rate(spo2Gap,[[0,10],[1,8],[2,6],[4,4],[6,2],[8,1],[Infinity,0]]);
+  // ODI con umbrales más exigentes.
+  const s2=rate(odi,[[1,10],[3,8],[5,6],[10,4],[15,2],[Infinity,0]]);
   const s3=rate(t90,[[0,10],[0.5,8],[1,6],[2,4],[5,2],[Infinity,0]]);
   const s4=rate(breathDist,[[5,10],[10,8],[15,6],[20,4],[30,2],[Infinity,0]]);
   const s5=rate(sleepEff==null?null:100-sleepEff,[[10,10],[15,8],[20,6],[25,4],[30,2],[Infinity,0]]);
   const s6=rate(deepRemPct==null?null:40-deepRemPct,[[0,10],[5,8],[10,6],[15,4],[20,2],[Infinity,0]]);
-  return Math.round((s1*.25+s2*.25+s3*.15+s4*.15+s5*.10+s6*.10)*10)/10;
+
+  // Pesos reequilibrados: MÁS peso a lo respiratorio (SpO2 + caídas + T90 = 75%),
+  // menos a sueño. Cada factor solo cuenta si tiene dato; su peso se reparte
+  // proporcionalmente entre los que sí lo tienen (no se rellena con 5 neutro).
+  const factores=[
+    {s:s1,w:0.35}, // SpO2 mínima  (antes 25%)
+    {s:s2,w:0.25}, // ODI/caídas
+    {s:s3,w:0.15}, // T90
+    {s:s4,w:0.10}, // perturbaciones respiratorias (antes 15%)
+    {s:s5,w:0.08}, // eficiencia sueño (antes 10%)
+    {s:s6,w:0.07}, // calidad sueño (antes 10%)
+  ];
+  const validos=factores.filter(f=>f.s!=null);
+  if(!validos.length)return null;
+  const wTotal=validos.reduce((a,f)=>a+f.w,0);
+  let score=validos.reduce((a,f)=>a+f.s*(f.w/wTotal),0);
+
+  // Tope de seguridad por SpO2 crítica: la caída grave limita la nota máxima.
+  if(spo2Min!=null){
+    for(const t of PERFIL.topeSpo2){
+      if(spo2Min<t.min)score=Math.min(score,t.notaMax);
+    }
+  }
+  return Math.round(score*10)/10;
 }
 function scoreLabel(s){
   if(s==null)return{label:'–',color:'var(--muted)'};
