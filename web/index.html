@@ -179,6 +179,7 @@
   .evo-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .spo2min-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .score-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
+  .msum-range-btn.active{border-color:#1A9E8F88;color:#1A9E8F;background:rgba(26,158,143,.08);}
   .score-reading{margin-top:12px;padding:12px 14px;border-radius:10px;background:var(--bg);border-left:3px solid var(--border);font-size:13px;line-height:1.5;color:var(--text);}
   .score-reading .sr-head{font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:6px;}
   .score-reading .sr-detail{font-size:12px;color:var(--muted);margin-top:4px;}
@@ -560,7 +561,17 @@
 
     <!-- Resumen del mes -->
     <div class="panel" id="monthSummaryPanel">
-      <div class="panel-title" id="monthSummaryTitle" style="margin-bottom:14px">Resumen del mes</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <div class="panel-title" id="monthSummaryTitle" style="margin-bottom:0">Resumen — últimos 30 días</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <button class="dual-btn msum-range-btn" data-range="7" onclick="setMsumRange(7)">7 d</button>
+          <button class="dual-btn msum-range-btn" data-range="14" onclick="setMsumRange(14)">14 d</button>
+          <button class="dual-btn msum-range-btn active" data-range="30" onclick="setMsumRange(30)">30 d</button>
+          <button class="dual-btn msum-range-btn" data-range="90" onclick="setMsumRange(90)">90 d</button>
+          <button class="dual-btn msum-range-btn" data-range="180" onclick="setMsumRange(180)">180 d</button>
+          <button class="dual-btn msum-range-btn" data-range="360" onclick="setMsumRange(360)">360 d</button>
+        </div>
+      </div>
       <div id="monthSummaryContent"></div>
     </div>
 
@@ -2309,9 +2320,17 @@ function downloadSleepCSV(){
 }
 
 // ── Resumen del mes ───────────────────────────────────────────────────────
+let msumRange=30;
+function setMsumRange(n){
+  msumRange=n;
+  document.querySelectorAll('.msum-range-btn').forEach(b=>{
+    b.classList.toggle('active',parseInt(b.dataset.range)===n);
+  });
+  renderMonthSummary();
+}
 function renderMonthSummary(){
-  const mDays=monthsMap[selectedMonth]||[];
-  document.getElementById('monthSummaryTitle').textContent=`Resumen del mes — ${fmtMonthLabel(selectedMonth)}`;
+  const mDays=allDays.slice(-msumRange);
+  document.getElementById('monthSummaryTitle').textContent=`Resumen — últimos ${msumRange} días`;
   const cont=document.getElementById('monthSummaryContent');
 
   // Recoger noches con datos reales (con SpO2 o sueño)
@@ -2402,7 +2421,7 @@ function renderMonthSummary(){
         <span class="msum-hl-val" style="color:var(--pink)">${avgRhr!=null?Math.round(avgRhr)+' bpm':'–'}</span>
       </div>
       <div class="msum-hl">
-        <span class="msum-hl-label">Caídas SpO2 del mes</span>
+        <span class="msum-hl-label">Caídas SpO2 del periodo</span>
         <span class="msum-hl-val">${totalEv94} bajo 94%${totalEv90>0?' · '+totalEv90+' bajo 90%':''}</span>
       </div>
     </div>`;
