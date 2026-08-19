@@ -1037,8 +1037,16 @@ function estimateSleepFromHR(hrNight, restingHR, stepsNight, sleepStart, sleepEn
   else{ventanaFin=11*60+1440;} // por defecto hasta las 11:00 de la mañana
 
   // ── Filtro por pasos (ráfagas reales de actividad, no ruido periódico) ──
+  // IMPORTANTE: solo miramos los pasos de la fase de "irse a la cama" (antes de
+  // que se duerma por primera vez). Las idas al baño de madrugada NO deben mover
+  // el inicio del sueño. Por eso limitamos el suelo a las primeras ~2.5h de la
+  // ventana (o hasta 1h después del sleepStart del reloj, lo que sea antes).
   let sueloInicioCont=-Infinity;
   if(stepsNight&&stepsNight.length){
+    // Límite hasta donde consideramos "preparándose para dormir"
+    let limiteFase;
+    if(sleepStart)limiteFase=toCont(sleepStart,rama(sleepStart,false))+60;
+    else limiteFase=ventanaIni+150; // 2.5h desde el inicio de la ventana
     const pasos=stepsNight
       .map(p=>({cont:toCont(p.time,rama(p.time,p.prev)),val:p.value}))
       .filter(p=>p.val>0)
@@ -1048,9 +1056,9 @@ function estimateSleepFromHR(hrNight, restingHR, stepsNight, sleepStart, sleepEn
       if(actual&&p.cont-actual.fin<=3){actual.fin=p.cont;actual.total+=p.val;actual.n++;}
       else{actual={ini:p.cont,fin:p.cont,total:p.val,n:1};rafagas.push(actual);}
     }
-    // Ráfaga real de "levantarse": >=40 pasos y varios registros seguidos.
-    // Solo cuentan las que caen dentro de la ventana de sueño (no de día).
-    const reales=rafagas.filter(r=>r.total>=40&&(r.n>=3||r.fin-r.ini>=2)&&r.fin>=ventanaIni&&r.fin<=ventanaFin);
+    // Ráfaga real de "levantarse a acostarse": >=40 pasos, varios registros,
+    // y DENTRO de la fase de irse a la cama (no idas al baño de madrugada).
+    const reales=rafagas.filter(r=>r.total>=40&&(r.n>=3||r.fin-r.ini>=2)&&r.fin>=ventanaIni&&r.fin<=limiteFase);
     if(reales.length)sueloInicioCont=Math.max(...reales.map(r=>r.fin))+5;
   }
 
@@ -1093,7 +1101,7 @@ function estimateSleepFromHR(hrNight, restingHR, stepsNight, sleepStart, sleepEn
     // Diagnóstico: contar cuántos puntos hay en ventana y cuántos bajo umbral
     const enV=serie.filter(enVentana);
     const bajoU=enV.filter(p=>p.v<=umbral);
-    return {error:true, motivo:`${serie.length} FC noche · ${enV.length} en ventana · ${bajoU.length} bajo ${umbral}bpm · umbral=reposo(${restingHR})+4 · ini=${ini?ini.time:'no'} fin=${fin?fin.time:'no'}`};
+    return {error:true, motivo:`${serie.length} FC · ${enV.length} en ventana · ${bajoU.length} bajo ${umbral}bpm · suelo=${sueloInicioCont>-Infinity?minToHHMM(((sueloInicioCont%1440)+1440)%1440):'no'} · ini=${ini?ini.time:'no'} fin=${fin?fin.time:'no'}`};
   }
   const dur=(fin.cont-ini.cont)/60; // horas (timeline continuo, ya sin saltos)
   // Salvaguarda: descartar resultados imposibles (>12h de sueño continuo)
