@@ -1064,44 +1064,52 @@ function estimateSleepFromHR(hrNight, restingHR, stepsNight, sleepStart, sleepEn
 
   const enVentana=p=>p.cont>=ventanaIni&&p.cont<=ventanaFin;
 
-  // INICIO: primer punto en ventana (y tras el último paso) con FC sostenida baja.
-  // Ventana de comprobación de 40 min; se adapta a datos densos o espaciados:
-  // basta con >=2 lecturas y que >=80% estén bajo el umbral.
-  function findStart(){
-    for(let i=0;i<serie.length;i++){
-      const p=serie[i];
-      if(!enVentana(p)||p.cont<sueloInicioCont)continue;
+  // Método robusto basado en el TRAMO de sueño, tolerando fluctuaciones
+  // (idas al baño, desvelos): el sueño es el span desde la primera hasta la
+  // última lectura de FC en reposo dentro de la ventana, siempre que las
+  // lecturas bajas dominen ese tramo. Menos frágil que exigir continuidad.
+  const enV=serie.filter(enVentana);
+  if(enV.length<4)return {error:true, motivo:`solo ${enV.length} FC en ventana nocturna`};
+
+  // Primera lectura baja sostenida: primer punto bajo umbral que tiene al menos
+  // otra lectura baja en los siguientes 45 min (para no coger un valle aislado).
+  // Respeta el suelo por pasos (fin de prepararse para la cama).
+  function primerBajaSostenida(){
+    for(let i=0;i<enV.length;i++){
+      const p=enV[i];
+      if(p.cont<sueloInicioCont)continue;
       if(p.v<=umbral){
-        let bajo=0,total=0;
-        for(let j=i;j<serie.length&&serie[j].cont-p.cont<=40;j++){
-          total++;if(serie[j].v<=umbral)bajo++;
+        // ¿hay otra lectura baja en los próximos 45 min?
+        for(let j=i+1;j<enV.length&&enV[j].cont-p.cont<=45;j++){
+          if(enV[j].v<=umbral)return p;
         }
-        if(total>=2&&bajo/total>=0.8)return p;
       }
     }
     return null;
   }
-  // FIN: último punto en ventana con FC sostenida baja
-  function findEnd(){
-    for(let i=serie.length-1;i>=0;i--){
-      const p=serie[i];
-      if(!enVentana(p))continue;
+  // Última lectura baja sostenida (simétrico)
+  function ultimaBajaSostenida(){
+    for(let i=enV.length-1;i>=0;i--){
+      const p=enV[i];
       if(p.v<=umbral){
-        let bajo=0,total=0;
-        for(let j=i;j>=0&&p.cont-serie[j].cont<=40;j--){
-          total++;if(serie[j].v<=umbral)bajo++;
+        for(let j=i-1;j>=0&&p.cont-enV[j].cont<=45;j--){
+          if(enV[j].v<=umbral)return p;
         }
-        if(total>=2&&bajo/total>=0.8)return p;
       }
     }
     return null;
   }
-  const ini=findStart(), fin=findEnd();
+  const ini=primerBajaSostenida(), fin=ultimaBajaSostenida();
   if(!ini||!fin||fin.cont<=ini.cont){
-    // Diagnóstico: contar cuántos puntos hay en ventana y cuántos bajo umbral
-    const enV=serie.filter(enVentana);
     const bajoU=enV.filter(p=>p.v<=umbral);
     return {error:true, motivo:`${serie.length} FC · ${enV.length} en ventana · ${bajoU.length} bajo ${umbral}bpm · suelo=${sueloInicioCont>-Infinity?minToHHMM(((sueloInicioCont%1440)+1440)%1440):'no'} · ini=${ini?ini.time:'no'} fin=${fin?fin.time:'no'}`};
+  }
+  // Verificar que en el tramo [ini,fin] las lecturas bajas dominan (>=60%),
+  // para no marcar como sueño un tramo mayormente despierto.
+  const enTramo=enV.filter(p=>p.cont>=ini.cont&&p.cont<=fin.cont);
+  const bajasTramo=enTramo.filter(p=>p.v<=umbral).length;
+  if(enTramo.length>0&&bajasTramo/enTramo.length<0.6){
+    return {error:true, motivo:`tramo poco consistente (${bajasTramo}/${enTramo.length} bajas)`};
   }
   const dur=(fin.cont-ini.cont)/60; // horas (timeline continuo, ya sin saltos)
   // Salvaguarda: descartar resultados imposibles (>12h de sueño continuo)
