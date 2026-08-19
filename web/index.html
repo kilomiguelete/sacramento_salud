@@ -1110,10 +1110,19 @@ function updateSleepEstimate(){
   const hrNight=dd.hr||[];
   const stepsNight=dd.steps||[];
   const est=estimateSleepFromHR(hrNight,restingHR,stepsNight,sleepStart,sleepEnd);
-  if(!est||oficialH==null){
-    el.style.display='block';
-    el.style.color='var(--muted)';
-    el.textContent='Estimación por FC no disponible esta noche';
+  if(oficialH==null){
+    el.style.display='block';el.style.color='var(--muted)';
+    el.textContent='Sin dato de sueño del reloj para comparar';
+    return;
+  }
+  if(!est){
+    el.style.display='block';el.style.color='var(--muted)';
+    // Explicar por qué no se pudo estimar
+    let motivo='datos insuficientes';
+    if(restingHR==null)motivo='falta FC de reposo';
+    else if(hrNight.length<10)motivo=`solo ${hrNight.length} lecturas de FC nocturna`;
+    else if(!sleepStart||!sleepEnd)motivo='el reloj no marcó ventana de sueño';
+    el.textContent=`Estimación por FC no disponible (${motivo})`;
     return;
   }
 
