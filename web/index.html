@@ -1027,11 +1027,14 @@ function estimateSleepFromHR(hrNight, restingHR, stepsNight, sleepStart, sleepEn
     return {cont:toCont(p.time,esPrev),v:p.avg,time:p.time,prev:esPrev};
   }).sort((a,b)=>a.cont-b.cont);
 
-  // Ventana de búsqueda: acotar al entorno del sueño del reloj para no salirse.
-  // Desde 60 min antes del sleepStart hasta 60 min después del sleepEnd.
-  let ventanaIni=-Infinity, ventanaFin=Infinity;
-  if(sleepStart){const[h,m]=sleepStart.split(':').map(Number);ventanaIni=toCont(sleepStart,rama(sleepStart,false))-60;}
-  if(sleepEnd){const[h,m]=sleepEnd.split(':').map(Number);ventanaFin=toCont(sleepEnd,rama(sleepEnd,false))+60;}
+  // Ventana de búsqueda. El INICIO puede ser bastante antes de lo que marcó el
+  // reloj (esa es la gracia: detectar si se durmió antes). Permitimos buscar el
+  // inicio desde las 21:00 de la tarde-noche. El FIN se acota cerca del despertar
+  // del reloj (+60 min) para no invadir la actividad de día siguiente.
+  let ventanaIni=21*60; // 21:00 de la tarde-noche (rama prev, cont=1260)
+  let ventanaFin=Infinity;
+  if(sleepEnd){ventanaFin=toCont(sleepEnd,rama(sleepEnd,false))+60;}
+  else{ventanaFin=11*60+1440;} // por defecto hasta las 11:00 de la mañana
 
   // ── Filtro por pasos (ráfagas reales de actividad, no ruido periódico) ──
   let sueloInicioCont=-Infinity;
@@ -1053,17 +1056,19 @@ function estimateSleepFromHR(hrNight, restingHR, stepsNight, sleepStart, sleepEn
 
   const enVentana=p=>p.cont>=ventanaIni&&p.cont<=ventanaFin;
 
-  // INICIO: primer punto en ventana (y tras el último paso) con FC sostenida baja
+  // INICIO: primer punto en ventana (y tras el último paso) con FC sostenida baja.
+  // Ventana de comprobación de 40 min; se adapta a datos densos o espaciados:
+  // basta con >=2 lecturas y que >=80% estén bajo el umbral.
   function findStart(){
     for(let i=0;i<serie.length;i++){
       const p=serie[i];
       if(!enVentana(p)||p.cont<sueloInicioCont)continue;
       if(p.v<=umbral){
         let bajo=0,total=0;
-        for(let j=i;j<serie.length&&serie[j].cont-p.cont<=30;j++){
+        for(let j=i;j<serie.length&&serie[j].cont-p.cont<=40;j++){
           total++;if(serie[j].v<=umbral)bajo++;
         }
-        if(total>=4&&bajo/total>=0.85)return p;
+        if(total>=2&&bajo/total>=0.8)return p;
       }
     }
     return null;
@@ -1075,10 +1080,10 @@ function estimateSleepFromHR(hrNight, restingHR, stepsNight, sleepStart, sleepEn
       if(!enVentana(p))continue;
       if(p.v<=umbral){
         let bajo=0,total=0;
-        for(let j=i;j>=0&&p.cont-serie[j].cont<=30;j--){
+        for(let j=i;j>=0&&p.cont-serie[j].cont<=40;j--){
           total++;if(serie[j].v<=umbral)bajo++;
         }
-        if(total>=4&&bajo/total>=0.85)return p;
+        if(total>=2&&bajo/total>=0.8)return p;
       }
     }
     return null;
