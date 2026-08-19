@@ -1089,10 +1089,15 @@ function estimateSleepFromHR(hrNight, restingHR, stepsNight, sleepStart, sleepEn
     return null;
   }
   const ini=findStart(), fin=findEnd();
-  if(!ini||!fin||fin.cont<=ini.cont)return null;
+  if(!ini||!fin||fin.cont<=ini.cont){
+    // Diagnóstico: contar cuántos puntos hay en ventana y cuántos bajo umbral
+    const enV=serie.filter(enVentana);
+    const bajoU=enV.filter(p=>p.v<=umbral);
+    return {error:true, motivo:`${serie.length} FC noche · ${enV.length} en ventana · ${bajoU.length} bajo ${umbral}bpm · umbral=reposo(${restingHR})+4 · ini=${ini?ini.time:'no'} fin=${fin?fin.time:'no'}`};
+  }
   const dur=(fin.cont-ini.cont)/60; // horas (timeline continuo, ya sin saltos)
   // Salvaguarda: descartar resultados imposibles (>12h de sueño continuo)
-  if(dur>12||dur<0)return null;
+  if(dur>12||dur<0)return {error:true, motivo:`duración imposible ${dur.toFixed(1)}h`};
   return {horas:dur, startLabel:ini.time, endLabel:fin.time,
           sueloPorPasos:sueloInicioCont>-Infinity};
 }
@@ -1120,13 +1125,13 @@ function updateSleepEstimate(){
     el.textContent='Sin dato de sueño del reloj para comparar';
     return;
   }
-  if(!est){
+  if(!est||est.error){
     el.style.display='block';el.style.color='var(--muted)';
-    // Explicar por qué no se pudo estimar
     let motivo='datos insuficientes';
     if(restingHR==null)motivo='falta FC de reposo';
     else if(hrNight.length<10)motivo=`solo ${hrNight.length} lecturas de FC nocturna`;
     else if(!sleepStart||!sleepEnd)motivo='el reloj no marcó ventana de sueño';
+    else if(est&&est.motivo)motivo=est.motivo;
     el.textContent=`Estimación por FC no disponible (${motivo})`;
     return;
   }
