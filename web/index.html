@@ -1110,17 +1110,28 @@ function updateSleepEstimate(){
   const hrNight=dd.hr||[];
   const stepsNight=dd.steps||[];
   const est=estimateSleepFromHR(hrNight,restingHR,stepsNight,sleepStart,sleepEnd);
-  if(!est||oficialH==null){el.style.display='none';return;}
+  if(!est||oficialH==null){
+    el.style.display='block';
+    el.style.color='var(--muted)';
+    el.textContent='Estimación por FC no disponible esta noche';
+    return;
+  }
 
   const diffMin=Math.round((est.horas-oficialH)*60);
-  // Solo mostrar si la estimación sugiere bastante MÁS sueño (>=25 min).
+  const notaPasos=est.sueloPorPasos?' · ajustado por pasos':'';
+  el.style.display='block';
   if(diffMin>=25){
-    el.style.display='block';
+    // El reloj se quedó corto: la FC sugiere bastante más sueño
     el.style.color='#5B9BD5';
-    const notaPasos=est.sueloPorPasos?' · ajustado por pasos':'';
     el.innerHTML=`≈ ${fmtH(est.horas)} estimado por FC (${est.startLabel}–${est.endLabel}) · +${diffMin} min sobre el reloj${notaPasos}`;
+  }else if(diffMin<=-25){
+    // La FC sugiere menos sueño (el reloj contó de más)
+    el.style.color='#C98B0A';
+    el.innerHTML=`≈ ${fmtH(est.horas)} estimado por FC (${est.startLabel}–${est.endLabel}) · ${diffMin} min respecto al reloj${notaPasos}`;
   }else{
-    el.style.display='none';
+    // Coinciden: el reloj y la FC dan prácticamente lo mismo
+    el.style.color='var(--good)';
+    el.innerHTML=`✓ FC coincide con el reloj (≈ ${fmtH(est.horas)} estimado)${notaPasos}`;
   }
 }
 
