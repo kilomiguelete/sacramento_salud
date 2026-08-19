@@ -326,6 +326,7 @@
         <div class="card-label">Sueño total</div>
         <div class="card-value" id="valSleep" style="color:var(--purple)">–</div>
         <div class="card-sub" id="subSleep">–</div>
+        <div class="card-sub" id="subSleepEst" style="margin-top:2px;display:none"></div>
       </div>
       <div class="card">
         <div class="card-label">Eficiencia sueño</div>
@@ -988,6 +989,114 @@ function computeODI(spo2Sleep, sleepHours){
     else{inEvent=false;}
   }
   return Math.round((events/sleepHours)*10)/10;
+}
+
+// ── Estimación de sueño real a partir de la FC ────────────────────────────
+// El Apple Watch a veces marca el inicio del sueño más tarde de lo real
+// (necesita quietud sostenida). Esta función estima la ventana de sueño
+// buscando cuándo la FC baja y se MANTIENE cerca de la FC de reposo.
+// Es una ESTIMACIÓN orientativa basada solo en FC, no un dato médico.
+function estimateSleepFromHR(hrDayX, restingHR, stepsDayX){
+  if(!hrDayX||hrDayX.length<10||restingHR==null)return null;
+  // Umbral: FC de reposo + 4 bpm. Por debajo = "cuerpo en reposo".
+  const umbral=restingHR+4;
+  // Ordenar por hora real
+  const pts=[...hrDayX].filter(p=>p.avg!=null).sort((a,b)=>a.measured_at.localeCompare(b.measured_at));
+  if(pts.length<10)return null;
+  // Convertir a minutos-del-día usando la hora local
+  const toMinLocal=ts=>{const t=localTime(ts);const[h,m]=t.split(':').map(Number);return h*60+m;};
+  const serie=pts.map(p=>({min:toMinLocal(p.measured_at),v:p.avg,ts:p.measured_at}));
+
+  // ── Filtro por pasos ──
+  // Sacramento suele andar justo antes de acostarse (baño, dientes, ir de la
+  // mecedora a la cama). Si está andando de verdad, está despierta y activa.
+  // OJO: el Apple Watch registra "pasos fantasma" aislados cada 30 min exactos
+  // (artefacto del sensor), que NO son actividad real. Por eso no miramos
+  // pasos sueltos, sino RÁFAGAS: varios minutos seguidos con movimiento que
+  // sumen bastantes pasos (patrón de levantarse y andar de verdad).
+  let sueloInicioMin=0;
+  if(stepsDayX&&stepsDayX.length){
+    // Pasos de madrugada (hasta 05:00) a minutos del día
+    const pasosMad=stepsDayX
+      .map(p=>{const[h,m]=p.time.split(':').map(Number);return {min:h*60+m,val:p.value};})
+      .filter(p=>p.min<=5*60&&p.val>0)
+      .sort((a,b)=>a.min-b.min);
+    // Agrupar en ráfagas: pasos separados <=3 min pertenecen a la misma ráfaga
+    let rafagas=[],actual=null;
+    for(const p of pasosMad){
+      if(actual&&p.min-actual.fin<=3){actual.fin=p.min;actual.total+=p.val;actual.n++;}
+      else{actual={ini:p.min,fin:p.min,total:p.val,n:1};rafagas.push(actual);}
+    }
+    // Una ráfaga cuenta como "levantarse" si suma >=40 pasos Y dura o tiene
+    // varios registros (no un pico aislado). Esto descarta el ruido periódico.
+    const rafagasReales=rafagas.filter(r=>r.total>=40&&(r.n>=3||r.fin-r.ini>=2));
+    if(rafagasReales.length){
+      // El final de la última ráfaga real + 5 min es el suelo del inicio de sueño
+      sueloInicioMin=Math.max(...rafagasReales.map(r=>r.fin))+5;
+    }
+  }
+
+  // Buscar INICIO: primer punto (a partir del suelo por pasos) tras el cual la
+  // FC se mantiene bajo el umbral durante ≥30 min de forma sostenida y estable.
+  function findStart(){
+    for(let i=0;i<serie.length;i++){
+      if(serie[i].min<sueloInicioMin)continue; // no antes del último paso
+      if(serie[i].v<=umbral){
+        let bajo=0,total=0;
+        for(let j=i;j<serie.length&&serie[j].min-serie[i].min<=30;j++){
+          total++;if(serie[j].v<=umbral)bajo++;
+        }
+        if(total>=4&&bajo/total>=0.85)return serie[i];
+      }
+    }
+    return null;
+  }
+  // Buscar FIN: último punto sostenido bajo umbral antes de despertarse
+  function findEnd(){
+    for(let i=serie.length-1;i>=0;i--){
+      if(serie[i].v<=umbral){
+        let bajo=0,total=0;
+        for(let j=i;j>=0&&serie[i].min-serie[j].min<=30;j--){
+          total++;if(serie[j].v<=umbral)bajo++;
+        }
+        if(total>=4&&bajo/total>=0.85)return serie[i];
+      }
+    }
+    return null;
+  }
+  const ini=findStart(), fin=findEnd();
+  if(!ini||!fin||fin.min<=ini.min)return null;
+  // Duración estimada en horas (tramo continuo en reposo)
+  let dur=(fin.min-ini.min)/60;
+  if(dur<0)dur+=24;
+  return {startMin:ini.min, endMin:fin.min, horas:dur,
+          startTs:ini.ts, endTs:fin.ts, sueloPorPasos:sueloInicioMin>0};
+}
+function minToHHMM(m){const h=Math.floor(m/60),mm=m%60;return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;}
+
+// Muestra la estimación de sueño bajo la tarjeta de sueño, comparándola con
+// el dato oficial del reloj. Solo aparece si difiere de forma apreciable.
+function updateSleepEstimate(hrDayX){
+  const el=document.getElementById('subSleepEst');
+  if(!el)return;
+  const s=summaries[selectedDate];
+  const restingHR=s?.vitals?.resting_heart_rate;
+  const oficialH=s?.sleep?.total_sleep;
+  const stepsDayX=dayDetail[selectedDate]?.stepsDayX||[];
+  const est=estimateSleepFromHR(hrDayX,restingHR,stepsDayX);
+  if(!est||oficialH==null){el.style.display='none';return;}
+
+  const diffMin=Math.round((est.horas-oficialH)*60);
+  // Solo mostrar si la estimación sugiere bastante MÁS sueño (>=25 min),
+  // que es el caso útil: el reloj se quedó corto.
+  if(diffMin>=25){
+    el.style.display='block';
+    el.style.color='#5B9BD5';
+    const notaPasos=est.sueloPorPasos?' · ajustado por pasos':'';
+    el.innerHTML=`≈ ${fmtH(est.horas)} estimado por FC (${minToHHMM(est.startMin)}–${minToHHMM(est.endMin)}) · +${diffMin} min sobre el reloj${notaPasos}`;
+  }else{
+    el.style.display='none';
+  }
 }
 
 // T90/T94: % de lecturas bajo el umbral
@@ -2498,6 +2607,9 @@ async function renderHR24(){
   await loadDayDetail(selectedDate);
   // FC del día natural X completo (00:00–23:59), no la ventana de sueño
   const hr=dayDetail[selectedDate].hrDayX||[];
+
+  // Estimación de sueño real a partir de la FC (compara con el dato del reloj)
+  updateSleepEstimate(hr);
 
   if(!hr||!hr.length){
     document.getElementById('hr24Wrap').innerHTML='<div class="chart-loading">Sin datos de FC para este día</div>';
