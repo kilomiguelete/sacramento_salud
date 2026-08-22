@@ -2451,7 +2451,7 @@ function setSleepRange(r){
   });
   renderSleepChart();
 }
-function renderSleepChart(){
+async function renderSleepChart(){
   if(!selectedDate)return;
   // Días a mostrar: últimos N hasta selectedDate
   const rd=allDays.slice(-sleepRange);
@@ -2460,23 +2460,48 @@ function renderSleepChart(){
   // Media de las noches con dato (para subtítulo y línea de referencia)
   const valid=data.filter(v=>v!=null);
   const avg=valid.length?valid.reduce((a,b)=>a+b,0)/valid.length:null;
+
+  // Estimación por FC para cada noche. Requiere el detalle de cada día, que
+  // se carga bajo demanda. Para no ralentizar, solo se calcula en rangos
+  // manejables (≤31 días); en rangos largos se usa lo ya cargado.
+  const estData=new Array(rd.length).fill(null);
+  const cargar=sleepRange<=31;
+  for(let i=0;i<rd.length;i++){
+    const d=rd[i];
+    if(cargar&&!dayDetail[d]){try{await loadDayDetail(d);}catch(e){}}
+    const dd=dayDetail[d];
+    if(!dd)continue;
+    const s=summaries[d];
+    const restingHR=s?.vitals?.resting_heart_rate;
+    const sleep=s?.sleep;
+    const sStart=sleep?.sleep_start?localTime(sleep.sleep_start):undefined;
+    const sEnd=sleep?.sleep_end?localTime(sleep.sleep_end):undefined;
+    const est=estimateSleepFromHR(dd.hr||[],restingHR,dd.steps||[],sStart,sEnd);
+    if(est&&!est.error)estData[i]=Math.round(est.horas*100)/100;
+  }
+  const algunaEst=estData.some(v=>v!=null);
   document.getElementById('sleepChartSub').textContent=avg!=null
-    ?`Horas por noche · media ${fmtH(avg)}`
+    ?`Reloj vs estimación por FC · media reloj ${fmtH(avg)}`
     :'Horas de sueño por noche';
 
   // Color por calidad de duración: <6h ámbar, <5h rojo, ≥7h verde fuerte
   const barColor=v=>v==null?gridColor():v<5?'rgba(217,64,64,.65)':v<6?'rgba(201,139,10,.6)':v>=7?'rgba(29,158,117,.6)':'rgba(122,110,232,.55)';
   const maxTicks=sleepRange<=7?7:sleepRange<=30?12:sleepRange<=90?14:sleepRange<=180?16:18;
 
+  const datasets=[{label:'Reloj',data,backgroundColor:data.map(barColor),borderRadius:3}];
+  if(algunaEst){
+    datasets.push({label:'Estimado por FC',data:estData,backgroundColor:'rgba(91,155,213,.55)',borderColor:'rgba(91,155,213,.9)',borderWidth:1,borderRadius:3});
+  }
+
   dc('sleep');
   charts.sleep=new Chart(document.getElementById('sleepChart'),{
     type:'bar',
-    data:{labels:rd.map(d=>fmtDateShort(prevDate(d))),datasets:[{label:'Sueño total',data,backgroundColor:data.map(barColor),borderRadius:3}]},
+    data:{labels:rd.map(d=>fmtDateShort(prevDate(d))),datasets},
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{
-        legend:{display:false},
-        tooltip:{callbacks:{title:items=>items[0].label,label:ctx=>ctx.parsed.y!=null?`Sueño: ${fmtH(ctx.parsed.y)}`:'Sin dato'}},
+        legend:{display:algunaEst,labels:{color:axisColor(),font:{size:10},boxWidth:12}},
+        tooltip:{callbacks:{title:items=>items[0].label,label:ctx=>ctx.parsed.y!=null?`${ctx.dataset.label}: ${fmtH(ctx.parsed.y)}`:'Sin dato'}},
       },
       scales:{
         x:{ticks:{color:axisColor(),font:{size:9},maxTicksLimit:maxTicks,maxRotation:0,minRotation:0,autoSkip:true},grid:{display:false}},
