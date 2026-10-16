@@ -242,6 +242,14 @@
       <div class="ssum-card" id="ssum60"><div class="ssum-lbl">Media 60 días</div><div class="ssum-num">–</div><div class="ssum-sub">–</div></div>
       <div class="ssum-card" id="ssum90"><div class="ssum-lbl">Media 90 días</div><div class="ssum-num">–</div><div class="ssum-sub">–</div></div>
     </div>
+    <!-- Sueño estimado por FC de reposo, mismos periodos -->
+    <div class="ssum" id="sleepEstSummary" style="margin-top:-4px">
+      <div class="ssum-card" id="sestNight"><div class="ssum-lbl">Sueño FC · última noche</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
+      <div class="ssum-card" id="sest7"><div class="ssum-lbl">Sueño FC · 7 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
+      <div class="ssum-card" id="sest30"><div class="ssum-lbl">Sueño FC · 30 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
+      <div class="ssum-card" id="sest60"><div class="ssum-lbl">Sueño FC · 60 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
+      <div class="ssum-card" id="sest90"><div class="ssum-lbl">Sueño FC · 90 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
+    </div>
 
     <!-- Navegación -->
     <div class="nav-container">
@@ -3674,11 +3682,83 @@ async function renderScoreSummary(){
   pintar('ssumNight',null,'Sin datos recientes');
 }
 
+// ── Sueño estimado por FC: última noche y medias 7/30/60/90 días ─────────
+// Para no cargar el detalle noche a noche (90 noches = cientos de consultas),
+// se descargan de una vez la FC y los pasos de todo el periodo, paginando,
+// y se reconstruye cada noche igual que loadDayDetail (tarde-noche X-1 + madrugada X).
+const sleepEstCache={}; // fecha -> {horas, reloj} | {error}
+async function fetchPaged(table,cols,from,to){
+  let out=[];
+  for(let page=0;page<300;page++){
+    const{data,error}=await db.from(table).select(cols).gte('date',from).lte('date',to)
+      .order('measured_at').range(page*1000,page*1000+999);
+    if(error)throw error;
+    out=out.concat(data||[]);
+    if(!data||data.length<1000)break;
+  }
+  return out;
+}
+async function computeSleepEstimates(noches){
+  const pend=noches.filter(d=>!(d in sleepEstCache));
+  if(!pend.length)return;
+  const from=prevDate(pend[0]), to=pend[pend.length-1];
+  const[hrRows,stRows]=await Promise.all([
+    fetchPaged('heart_rate_readings','date,measured_at,avg_hr',from,to),
+    fetchPaged('step_readings','date,measured_at,value',from,to),
+  ]);
+  const hrBy={},stBy={};
+  for(const r of hrRows)(hrBy[r.date]=hrBy[r.date]||[]).push(r);
+  for(const r of stRows)(stBy[r.date]=stBy[r.date]||[]).push(r);
+  const mapHr=(rows,prev)=>(rows||[]).map(r=>({time:localTime(r.measured_at),avg:r.avg_hr!=null?parseFloat(r.avg_hr):null,prev}));
+  const mapSt=(rows,prev)=>(rows||[]).map(r=>({time:localTime(r.measured_at),value:parseFloat(r.value),prev})).filter(s=>s.value>0);
+  for(const d of pend){
+    const s=summaries[d], pd=prevDate(d), sleep=s?.sleep;
+    const ss=sleep?.sleep_start?localTime(sleep.sleep_start):undefined;
+    const se=sleep?.sleep_end?localTime(sleep.sleep_end):undefined;
+    const hr=[...mapHr(hrBy[pd],true),...mapHr(hrBy[d],false)];
+    const st=[...mapSt(stBy[pd],true),...mapSt(stBy[d],false)];
+    const est=estimateSleepFromHR(hr,s?.vitals?.resting_heart_rate,st,ss,se);
+    sleepEstCache[d]=(est&&!est.error)?{horas:est.horas,reloj:sleep?.total_sleep??null}:{error:true};
+  }
+}
+async function renderSleepEstSummary(){
+  const noches=allDays.filter(d=>summaries[d]&&!summaries[d].parcial).slice(-90);
+  const ids=['sestNight','sest7','sest30','sest60','sest90'];
+  const colorH=h=>h<5?'#D94040':h<6?'#C98B0A':h>=7?'#1D9E75':'#7A6EE8';
+  const pintar=(id,h,sub)=>{
+    const el=document.getElementById(id);if(!el)return;
+    el.style.borderLeftColor=h!=null?colorH(h):'var(--border)';
+    el.querySelector('.ssum-num').innerHTML=h!=null?`<span style="color:${colorH(h)}">${fmtH(h)}</span>`:'–';
+    el.querySelector('.ssum-sub').innerHTML=sub;
+  };
+  try{await computeSleepEstimates(noches);}
+  catch(e){ids.forEach(id=>pintar(id,null,'Error al cargar FC'));return;}
+  const reloj=h=>h!=null?` · reloj ${fmtH(h)}`:'';
+  // Última noche con estimación disponible
+  let ult=null;
+  for(let i=noches.length-1;i>=Math.max(0,noches.length-5);i--){
+    const e=sleepEstCache[noches[i]];
+    if(e&&!e.error){ult={d:noches[i],...e};break;}
+  }
+  if(ult)pintar('sestNight',ult.horas,`${fmtDateShort(prevDate(ult.d))}→${fmtDateShort(ult.d)}${reloj(ult.reloj)}`);
+  else pintar('sestNight',null,'Sin estimación reciente');
+  // Medias por periodo
+  for(const[id,n]of[['sest7',7],['sest30',30],['sest60',60],['sest90',90]]){
+    const lista=noches.slice(-n).map(d=>sleepEstCache[d]).filter(e=>e&&!e.error);
+    if(!lista.length){pintar(id,null,'Sin datos');continue;}
+    const avg=lista.reduce((a,e)=>a+e.horas,0)/lista.length;
+    const rel=lista.filter(e=>e.reloj!=null);
+    const avgR=rel.length?rel.reduce((a,e)=>a+e.reloj,0)/rel.length:null;
+    pintar(id,avg,`${lista.length} de ${Math.min(n,noches.length)} noches${reloj(avgR)}`);
+  }
+}
+
 async function init(){
   document.getElementById('content').classList.add('hidden');
   document.getElementById('errorDiv').classList.add('hidden');
   document.getElementById('loader').classList.remove('hidden');
   dayDetail={};
+  for(const k in sleepEstCache)delete sleepEstCache[k];
   try{
     await loadSummaries();
     document.getElementById('loader').classList.add('hidden');
@@ -3688,6 +3768,7 @@ async function init(){
     selectedMonth=selectedDate.substring(0,7);
     renderMonths();renderDays();await renderDay();
     renderScoreSummary();
+    renderSleepEstSummary();
     loadSyncStatus();
   }catch(err){
     document.getElementById('loader').classList.add('hidden');
