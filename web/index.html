@@ -242,13 +242,13 @@
       <div class="ssum-card" id="ssum60"><div class="ssum-lbl">Media 60 días</div><div class="ssum-num">–</div><div class="ssum-sub">–</div></div>
       <div class="ssum-card" id="ssum90"><div class="ssum-lbl">Media 90 días</div><div class="ssum-num">–</div><div class="ssum-sub">–</div></div>
     </div>
-    <!-- Sueño estimado por FC de reposo, mismos periodos -->
+    <!-- Sueño (reloj) + tiempo en cama en reposo (FC), mismos periodos -->
     <div class="ssum" id="sleepEstSummary" style="margin-top:-4px">
-      <div class="ssum-card" id="sestNight"><div class="ssum-lbl">Sueño FC · última noche</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
-      <div class="ssum-card" id="sest7"><div class="ssum-lbl">Sueño FC · 7 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
-      <div class="ssum-card" id="sest30"><div class="ssum-lbl">Sueño FC · 30 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
-      <div class="ssum-card" id="sest60"><div class="ssum-lbl">Sueño FC · 60 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
-      <div class="ssum-card" id="sest90"><div class="ssum-lbl">Sueño FC · 90 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
+      <div class="ssum-card" id="sestNight"><div class="ssum-lbl">Sueño · última noche</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
+      <div class="ssum-card" id="sest7"><div class="ssum-lbl">Sueño · 7 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
+      <div class="ssum-card" id="sest30"><div class="ssum-lbl">Sueño · 30 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
+      <div class="ssum-card" id="sest60"><div class="ssum-lbl">Sueño · 60 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
+      <div class="ssum-card" id="sest90"><div class="ssum-lbl">Sueño · 90 días</div><div class="ssum-num">–</div><div class="ssum-sub">Calculando…</div></div>
     </div>
 
     <!-- Navegación -->
@@ -1177,22 +1177,18 @@ function updateSleepEstimate(){
     return;
   }
 
-  const diffMin=Math.round((est.horas-oficialH)*60);
-  const notaPasos=est.sueloPorPasos?' · ajustado por pasos':'';
+  // La FC no distingue "tumbada despierta" de "dormida" (a su edad la FC es
+  // igual en ambos casos), así que esto es TIEMPO EN CAMA EN REPOSO, no sueño.
+  // Lo útil: si la FC muestra que se durmió bastante antes de lo que marca el reloj.
   el.style.display='block';
-  if(diffMin>=25){
-    // El reloj se quedó corto: la FC sugiere bastante más sueño
-    el.style.color='#5B9BD5';
-    el.innerHTML=`≈ ${fmtH(est.horas)} estimado por FC (${est.startLabel}–${est.endLabel}) · +${diffMin} min sobre el reloj${notaPasos}`;
-  }else if(diffMin<=-25){
-    // La FC sugiere menos sueño (el reloj contó de más)
-    el.style.color='#C98B0A';
-    el.innerHTML=`≈ ${fmtH(est.horas)} estimado por FC (${est.startLabel}–${est.endLabel}) · ${diffMin} min respecto al reloj${notaPasos}`;
-  }else{
-    // Coinciden: el reloj y la FC dan prácticamente lo mismo
-    el.style.color='var(--good)';
-    el.innerHTML=`✓ FC coincide con el reloj (≈ ${fmtH(est.horas)} estimado)${notaPasos}`;
+  el.style.color='#5B9BD5';
+  const toM=t=>{const[h,m]=t.split(':').map(Number);const v=h*60+m;return h>=18?v-1440:v;};
+  let antes='';
+  if(sleepStart){
+    const dif=toM(sleepStart)-toM(est.startLabel);
+    if(dif>=25)antes=` · reposo desde ${dif} min antes de lo que marca el reloj`;
   }
+  el.innerHTML=`En cama en reposo (FC): ${est.startLabel}–${est.endLabel} · ${fmtH(est.horas)}${antes}`;
 }
 
 // T90/T94: % de lecturas bajo el umbral
@@ -2526,16 +2522,16 @@ async function renderSleepChart(){
   }
   const algunaEst=estData.some(v=>v!=null);
   document.getElementById('sleepChartSub').textContent=avg!=null
-    ?`Reloj vs estimación por FC · media reloj ${fmtH(avg)}`
+    ?`Sueño del reloj vs tiempo en cama en reposo (FC) · media sueño ${fmtH(avg)}`
     :'Horas de sueño por noche';
 
   // Color por calidad de duración: <6h ámbar, <5h rojo, ≥7h verde fuerte
   const barColor=v=>v==null?gridColor():v<5?'rgba(217,64,64,.65)':v<6?'rgba(201,139,10,.6)':v>=7?'rgba(29,158,117,.6)':'rgba(122,110,232,.55)';
   const maxTicks=sleepRange<=7?7:sleepRange<=30?12:sleepRange<=90?14:sleepRange<=180?16:18;
 
-  const datasets=[{label:'Reloj',data,backgroundColor:data.map(barColor),borderRadius:3}];
+  const datasets=[{label:'Sueño (reloj)',data,backgroundColor:data.map(barColor),borderRadius:3}];
   if(algunaEst){
-    datasets.push({label:'Estimado por FC',data:estData,backgroundColor:'rgba(91,155,213,.55)',borderColor:'rgba(91,155,213,.9)',borderWidth:1,borderRadius:3});
+    datasets.push({label:'En cama (FC)',data:estData,backgroundColor:'rgba(91,155,213,.55)',borderColor:'rgba(91,155,213,.9)',borderWidth:1,borderRadius:3});
   }
 
   dc('sleep');
@@ -3722,35 +3718,36 @@ async function computeSleepEstimates(noches){
   }
 }
 async function renderSleepEstSummary(){
+  // Cifra principal: sueño del RELOJ (descuenta ratos despierta: lo más fiable).
+  // Contexto: tiempo en cama en reposo según la FC (incluye ratos despierta).
   const noches=allDays.filter(d=>summaries[d]&&!summaries[d].parcial).slice(-90);
-  const ids=['sestNight','sest7','sest30','sest60','sest90'];
   const colorH=h=>h<5?'#D94040':h<6?'#C98B0A':h>=7?'#1D9E75':'#7A6EE8';
+  const reloj=d=>summaries[d]?.sleep?.total_sleep??null;
   const pintar=(id,h,sub)=>{
     const el=document.getElementById(id);if(!el)return;
     el.style.borderLeftColor=h!=null?colorH(h):'var(--border)';
     el.querySelector('.ssum-num').innerHTML=h!=null?`<span style="color:${colorH(h)}">${fmtH(h)}</span>`:'–';
     el.querySelector('.ssum-sub').innerHTML=sub;
   };
-  try{await computeSleepEstimates(noches);}
-  catch(e){ids.forEach(id=>pintar(id,null,'Error al cargar FC'));return;}
-  const reloj=h=>h!=null?` · reloj ${fmtH(h)}`:'';
-  // Última noche con estimación disponible
-  let ult=null;
-  for(let i=noches.length-1;i>=Math.max(0,noches.length-5);i--){
-    const e=sleepEstCache[noches[i]];
-    if(e&&!e.error){ult={d:noches[i],...e};break;}
-  }
-  if(ult)pintar('sestNight',ult.horas,`${fmtDateShort(prevDate(ult.d))}→${fmtDateShort(ult.d)}${reloj(ult.reloj)}`);
-  else pintar('sestNight',null,'Sin estimación reciente');
-  // Medias por periodo
-  for(const[id,n]of[['sest7',7],['sest30',30],['sest60',60],['sest90',90]]){
-    const lista=noches.slice(-n).map(d=>sleepEstCache[d]).filter(e=>e&&!e.error);
-    if(!lista.length){pintar(id,null,'Sin datos');continue;}
-    const avg=lista.reduce((a,e)=>a+e.horas,0)/lista.length;
-    const rel=lista.filter(e=>e.reloj!=null);
-    const avgR=rel.length?rel.reduce((a,e)=>a+e.reloj,0)/rel.length:null;
-    pintar(id,avg,`${lista.length} de ${Math.min(n,noches.length)} noches${reloj(avgR)}`);
-  }
+  const media=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+  const periodos=[['sest7',7],['sest30',30],['sest60',60],['sest90',90]];
+  let ultD=null;
+  for(let i=noches.length-1;i>=Math.max(0,noches.length-5);i--){if(reloj(noches[i])!=null){ultD=noches[i];break;}}
+  const pintarTodo=(conFC)=>{
+    const fc=d=>{const e=sleepEstCache[d];return e&&!e.error?e.horas:null;};
+    const cama=h=>h!=null?` · en cama (FC) ${fmtH(h)}`:(conFC?'':' · calculando FC…');
+    if(ultD)pintar('sestNight',reloj(ultD),`${fmtDateShort(prevDate(ultD))}→${fmtDateShort(ultD)}${cama(fc(ultD))}`);
+    else pintar('sestNight',null,'Sin datos recientes');
+    for(const[id,n]of periodos){
+      const ds=noches.slice(-n);
+      const r=ds.map(reloj).filter(v=>v!=null), f=ds.map(fc).filter(v=>v!=null);
+      if(!r.length){pintar(id,null,'Sin datos');continue;}
+      pintar(id,media(r),`${r.length} noche${r.length!==1?'s':''}${cama(media(f))}`);
+    }
+  };
+  pintarTodo(false);                      // reloj al instante
+  try{await computeSleepEstimates(noches);pintarTodo(true);}  // añade la FC
+  catch(e){pintarTodo(true);}
 }
 
 async function init(){
