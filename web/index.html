@@ -49,6 +49,13 @@
   /* Score banner */
   .score-banner{border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);gap:12px;flex-wrap:wrap;}
   .score-night{font-size:12px;color:var(--muted);}
+  .ssum{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;}
+  .ssum-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;border-left:3px solid var(--border);}
+  .ssum-lbl{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
+  .ssum-num{font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1;}
+  .ssum-num small{font-size:13px;font-weight:500;color:var(--muted);}
+  .ssum-sub{font-size:11px;color:var(--muted);margin-top:5px;}
+  @media(max-width:600px){.ssum{gap:6px;}.ssum-card{padding:10px;}.ssum-num{font-size:20px;}.ssum-lbl{font-size:9px;}}
   .score-night strong{color:var(--text);font-size:14px;}
   .score-badge{display:flex;align-items:center;gap:12px;}
   .score-num{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1;}
@@ -226,6 +233,13 @@
   </div>
 
   <div id="content" class="hidden">
+    <!-- Resumen de puntuaciones (independiente del día seleccionado) -->
+    <div class="ssum" id="scoreSummary">
+      <div class="ssum-card" id="ssumNight"><div class="ssum-lbl">Última noche</div><div class="ssum-num">–</div><div class="ssum-sub">Cargando…</div></div>
+      <div class="ssum-card" id="ssumWeek"><div class="ssum-lbl">Media 7 días</div><div class="ssum-num">–</div><div class="ssum-sub">–</div></div>
+      <div class="ssum-card" id="ssumMonth"><div class="ssum-lbl">Media 30 días</div><div class="ssum-num">–</div><div class="ssum-sub">–</div></div>
+    </div>
+
     <!-- Navegación -->
     <div class="nav-container">
       <div class="month-row">
@@ -3595,6 +3609,65 @@ async function loadSyncStatus(){
   }
 }
 
+// ── Resumen de puntuaciones: última noche, media 7 y 30 días ──────────────
+// La última noche usa el cálculo EXACTO (lecturas de SpO2 de la noche), igual
+// que al abrir ese día. Las medias usan summaryScore (rápido, mismo cálculo
+// que los puntos del calendario y la gráfica de evolución).
+async function exactNightScore(d){
+  await loadDayDetail(d);
+  const s=summaries[d], dd=dayDetail[d];
+  if(!s||!dd)return null;
+  const sleep=s.sleep;
+  const ss=sleep?.sleep_start?localTime(sleep.sleep_start):undefined;
+  const se=sleep?.sleep_end?localTime(sleep.sleep_end):undefined;
+  const spo2Sleep=filterNight(dd.spo2||[],ss,se);
+  const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
+  const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
+  const deepRemPct=sleep?.total_sleep>0?Math.round(((sleep.deep||0)+(sleep.rem||0))/sleep.total_sleep*100):null;
+  return computeScore({spo2Min:s.spo2_min,odi:computeODI(spo2Sleep,sleep?.total_sleep),t90:computeT(spo2Sleep,90),
+    breathDist:s.vitals?.breathing_disturbances,sleepEff:eff,deepRemPct,spo2Vals:spo2Sleep.map(p=>p.value)});
+}
+async function renderScoreSummary(){
+  const noches=allDays.filter(d=>summaries[d]&&!summaries[d].parcial);
+  const pintar=(id,score,sub,extra)=>{
+    const el=document.getElementById(id);if(!el)return;
+    const{label,color}=scoreLabel(score);
+    el.style.borderLeftColor=score!=null?color:'var(--border)';
+    el.querySelector('.ssum-num').innerHTML=score!=null?`<span style="color:${color}">${score.toFixed(1)}</span><small>/10</small>`:'–';
+    el.querySelector('.ssum-sub').innerHTML=score!=null?`<span style="color:${color};font-weight:600">${label}</span> · ${sub}${extra||''}`:sub;
+  };
+  const media=lista=>{const v=lista.map(summaryScore).filter(x=>x!=null);return v.length?{avg:Math.round(v.reduce((a,b)=>a+b,0)/v.length*10)/10,n:v.length}:null;};
+
+  const sem=media(noches.slice(-7)), mes=media(noches.slice(-30));
+  // Comparación semana vs mes: ¿la última semana va mejor o peor que la media del mes?
+  let tend='';
+  if(sem&&mes){
+    const d=sem.avg-mes.avg;
+    tend=Math.abs(d)<0.4?' · <span title="Similar a la media del mes">→ estable</span>'
+      :d>0?` · <span style="color:#1D9E75">▲ +${d.toFixed(1)} vs mes</span>`
+      :` · <span style="color:#D94040">▼ ${d.toFixed(1)} vs mes</span>`;
+  }
+  pintar('ssumWeek',sem?.avg??null,sem?`${sem.n} noches`:'Sin datos',tend);
+  pintar('ssumMonth',mes?.avg??null,mes?`${mes.n} noches`:'Sin datos');
+
+  // Última noche con puntuación (exacta)
+  for(let i=noches.length-1;i>=0;i--){
+    let sc=null;
+    try{sc=await exactNightScore(noches[i]);}catch(e){}
+    if(sc==null)sc=summaryScore(noches[i]);
+    if(sc!=null){
+      const d=noches[i];
+      pintar('ssumNight',sc,`${fmtDateShort(prevDate(d))}→${fmtDateShort(d)}`);
+      const el=document.getElementById('ssumNight');
+      el.style.cursor='pointer';el.title='Ver esta noche';
+      el.onclick=()=>{selectedDate=d;selectedMonth=d.substring(0,7);renderMonths();renderDays();renderDay();};
+      return;
+    }
+    if(noches.length-i>5)break; // no buscar más allá de 5 noches atrás
+  }
+  pintar('ssumNight',null,'Sin datos recientes');
+}
+
 async function init(){
   document.getElementById('content').classList.add('hidden');
   document.getElementById('errorDiv').classList.add('hidden');
@@ -3608,6 +3681,7 @@ async function init(){
     selectedDate=allDays[allDays.length-1];
     selectedMonth=selectedDate.substring(0,7);
     renderMonths();renderDays();await renderDay();
+    renderScoreSummary();
     loadSyncStatus();
   }catch(err){
     document.getElementById('loader').classList.add('hidden');
