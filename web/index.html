@@ -1195,10 +1195,16 @@ const PERFIL={
     {min: 88, notaMax: 3.5}, // SpO2 <88% -> como mucho "Preocupante"
     {min: 90, notaMax: 5},   // SpO2 <90% -> como mucho "Regular"
   ],
+  // Una caída es SOSTENIDA si hay al menos este nº de lecturas por debajo del 90%.
+  // Una sola lectura baja (aislada) aplica un tope más suave (+margenAislada),
+  // que baja la nota pero no la hunde. Clínicamente no es lo mismo un 84%
+  // puntual que un 84% mantenido.
+  lecturasSostenida: 2,
+  margenAislada: 2.5,      // <85 aislada -> máx 4.5 · <88 -> 6 · <90 -> 7.5
 };
 
 // Puntuación de noche 0–10 (mayor = mejor)
-function computeScore({spo2Min,odi,t90,breathDist,sleepEff,deepRemPct}){
+function computeScore({spo2Min,odi,t90,breathDist,sleepEff,deepRemPct,spo2Vals,nBajo90}){
   // rate() ahora devuelve null (no 5) cuando falta el dato, para poder
   // EXCLUIRLO del cálculo y repartir su peso, en vez de inflar la nota.
   function rate(v,thresholds){
@@ -1232,10 +1238,22 @@ function computeScore({spo2Min,odi,t90,breathDist,sleepEff,deepRemPct}){
   const wTotal=validos.reduce((a,f)=>a+f.w,0);
   let score=validos.reduce((a,f)=>a+f.s*(f.w/wTotal),0);
 
-  // Tope de seguridad por SpO2 crítica: la caída grave limita la nota máxima.
-  if(spo2Min!=null){
+  // Tope de seguridad por SpO2 crítica. Distingue caída SOSTENIDA (tope
+  // completo) de caída AISLADA (una sola lectura: tope suave).
+  // - Con las lecturas de la noche (spo2Vals) se cuenta exactamente.
+  // - Sin ellas, se usa nBajo90 (nº de lecturas <90%) como aproximación.
+  // - Sin ninguna información, se asume sostenida (criterio conservador).
+  // La "sostenibilidad" se mide al nivel del 90%: si hay 2+ lecturas por debajo
+  // del 90% esa noche, la desaturación es un episodio real y se aplica el tope
+  // completo del peor valor alcanzado. Si solo hay UNA lectura <90%, es un pico
+  // aislado y se aplica el tope suave.
+  if(spo2Min!=null&&spo2Min<90){
+    let nBajo=null;
+    if(Array.isArray(spo2Vals)&&spo2Vals.length)nBajo=spo2Vals.filter(v=>v<90).length;
+    else if(nBajo90!=null)nBajo=nBajo90;
+    const aislada=nBajo!=null&&nBajo<PERFIL.lecturasSostenida;
     for(const t of PERFIL.topeSpo2){
-      if(spo2Min<t.min)score=Math.min(score,t.notaMax);
+      if(spo2Min<t.min)score=Math.min(score,aislada?t.notaMax+PERFIL.margenAislada:t.notaMax);
     }
   }
   return Math.round(score*10)/10;
@@ -1268,7 +1286,8 @@ function summaryScore(d){
     t90:null,
     breathDist:v?.breathing_disturbances,
     sleepEff:eff,
-    deepRemPct
+    deepRemPct,
+    nBajo90:s.ev90!=null?s.ev90:null
   });
 }
 function odiLabel(v){
@@ -1693,7 +1712,7 @@ async function renderDay(){
 
   // Score provisional (sin ODI/T90 todavía)
   const deepRemPct=sleep?.total_sleep>0?Math.round(((sleep.deep||0)+(sleep.rem||0))/sleep.total_sleep*100):null;
-  let provisional=computeScore({spo2Min:spo2_min,odi:null,t90:null,breathDist:bd,sleepEff:eff,deepRemPct});
+  let provisional=computeScore({spo2Min:spo2_min,odi:null,t90:null,breathDist:bd,sleepEff:eff,deepRemPct,nBajo90:ev90});
   showScore(provisional,pd,'…','…');
 
   // Loading charts
@@ -1736,7 +1755,7 @@ async function renderDay(){
   document.getElementById('subT90').textContent=t90!=null?`${spo2Sleep.filter(p=>p.value<90).length} lecturas bajo 90%`:'–';
 
   // Score final con todos los datos
-  const score=computeScore({spo2Min:spo2_min,odi,t90,breathDist:bd,sleepEff:eff,deepRemPct});
+  const score=computeScore({spo2Min:spo2_min,odi,t90,breathDist:bd,sleepEff:eff,deepRemPct,spo2Vals:spo2Sleep.map(p=>p.value)});
   showScore(score,pd,odi,t90);
 
   // Habilitar botón modal
@@ -1883,7 +1902,8 @@ function runDetection(){
 
   // 1) SpO2 mínima
   if(s.spo2_min!=null){
-    if(s.spo2_min<88)findings.push({lvl:'alto',txt:`SpO2 mínima muy baja: ${s.spo2_min}%`,det:'Por debajo de 88%. Conviene vigilar y comentar con el neumólogo.'});
+    const aisl=(s.ev90!=null&&s.ev90<PERFIL.lecturasSostenida&&s.spo2_min<90)?' Fue una lectura aislada (no sostenida): baja la nota pero no la hunde; aun así conviene anotarla.':'';
+    if(s.spo2_min<88)findings.push({lvl:'alto',txt:`SpO2 mínima muy baja: ${s.spo2_min}%`,det:'Por debajo de 88%. Conviene vigilar y comentar con el neumólogo.'+aisl});
     else if(s.spo2_min<90)findings.push({lvl:'alto',txt:`SpO2 mínima baja: ${s.spo2_min}%`,det:'Por debajo de 90%.'});
     else if(s.spo2_min<93)findings.push({lvl:'medio',txt:`SpO2 mínima algo baja: ${s.spo2_min}%`,det:'Entre 90-92%.'});
   }
@@ -3061,7 +3081,7 @@ async function refreshCharts(){
   document.getElementById('valT94').textContent=t94!=null?t94+'%':'–';
   document.getElementById('valT90').textContent=t90!=null?t90+'%':'–';
 
-  const score=computeScore({spo2Min:s?.spo2_min,odi,t90,breathDist:bd,sleepEff:eff,deepRemPct});
+  const score=computeScore({spo2Min:s?.spo2_min,odi,t90,breathDist:bd,sleepEff:eff,deepRemPct,spo2Vals:spo2Sleep.map(p=>p.value)});
   showScore(score,prevDate(selectedDate),odi,t90);
 
   document.getElementById('spo2Wrap').innerHTML='<canvas id="spo2Chart"></canvas>';
