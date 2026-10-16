@@ -168,13 +168,23 @@ function processHealthJson(jsonData) {
       // que ya estuvieran guardados.
       var vitalRow = { date: date, updated_at: new Date().toISOString() };
       if (rrFirst)              vitalRow.resting_heart_rate     = rrFirst.qty;
-      var hrvAvg = avgArr(hrvArr, 'qty');
-      if (hrvAvg != null)       vitalRow.hrv_avg                = hrvAvg;
+      // VFC y frecuencia respiratoria: SOLO las lecturas dentro de la ventana de
+      // sueño de esa noche. Antes se promediaba todo el día, y la VFC diurna
+      // (más baja) arrastraba la media: p.ej. 27 ms de día vs 40 ms dormida.
+      // Si no hay registro de sueño todavía, no se toca lo que hubiera guardado.
+      var sl = (dm['sleep_analysis'] || [])[0];
+      var enSueno = function(arr) {
+        if (!sl || !sl.sleepStart || !sl.sleepEnd) return null;
+        var ini = sl.sleepStart.substring(0, 19), fin = sl.sleepEnd.substring(0, 19);
+        return arr.filter(function(p) { var t = (p.date || '').substring(0, 19); return t >= ini && t <= fin; });
+      };
+      var hrvNoche = enSueno(hrvArr);
+      if (hrvNoche) vitalRow.hrv_avg = avgArr(hrvNoche, 'qty');   // null si no hubo mediciones dormida
       if (breathFirst)          vitalRow.breathing_disturbances = breathFirst.qty;
       if (totalSteps != null)   vitalRow.step_count             = Math.round(totalSteps);
       if (tempFirst)            vitalRow.wrist_temperature      = tempFirst.qty;
-      var rrateAvg = avgArr(rrateArr, 'qty');
-      if (rrateAvg != null)     vitalRow.respiratory_rate_avg   = rrateAvg;
+      var rrNoche = enSueno(rrateArr);
+      if (rrNoche) vitalRow.respiratory_rate_avg = avgArr(rrNoche, 'qty');
       supabaseUpsert('daily_vitals', [vitalRow], 'date');
     }
 

@@ -1299,15 +1299,17 @@ function summaryScore(d){
   const inBed=sleep?.in_bed>0?sleep.in_bed:((sleep?.total_sleep||0)+(sleep?.awake||0));
   const eff=sleep?.total_sleep&&inBed>0?Math.round((sleep.total_sleep/inBed)*100):null;
   const deepRemPct=sleep?.total_sleep>0?Math.round(((sleep.deep||0)+(sleep.rem||0))/sleep.total_sleep*100):null;
-  // ev90 (caídas <90% en la noche) sirve como proxy del ODI; t90 no está
-  // pre-agregado, así que se omite (rate() le asigna 5 neutro).
+  // Con las lecturas de la noche (cargadas en loadSummaries) es el MISMO
+  // cálculo que al abrir el día. Si faltaran, se aproxima con ev90.
+  const exacto=Array.isArray(s.spo2_vals);
   return computeScore({
     spo2Min:s.spo2_min,
-    odi:s.ev90!=null?s.ev90:null,
-    t90:null,
+    odi:exacto?s.odi:(s.ev90!=null?s.ev90:null),
+    t90:exacto?s.t90:null,
     breathDist:v?.breathing_disturbances,
     sleepEff:eff,
     deepRemPct,
+    spo2Vals:exacto?s.spo2_vals:undefined,
     nBajo90:s.ev90!=null?s.ev90:null
   });
 }
@@ -1344,6 +1346,47 @@ async function loadSummaries(){
     summaries[d]={sleep:sleepByDate[d]||null,vitals:vitalsByDate[d]||null,...agg};
   }
   allDays=[...dates].sort();
+
+  // ── SpO2 de la NOCHE, no del día natural ──
+  // La vista spo2_daily agrupa por día natural (00:00–23:59): mezclaba lecturas
+  // de la tarde (despierta) en el mínimo de la noche y dejaba fuera la parte de
+  // la noche anterior a las 00:00. Se recalcula con las lecturas dentro de la
+  // ventana de sueño de cada noche, igual que la gráfica nocturna.
+  // Si falla la descarga, se mantienen los valores de la vista como respaldo.
+  try{
+    const filas=await fetchPaged('spo2_readings','date,measured_at,value',allDays[0]>'2000'?prevDate(allDays[0]):'2000-01-01','2100-01-01');
+    const porFecha={};
+    for(const r of filas)(porFecha[r.date]=porFecha[r.date]||[]).push(r);
+    const mapa=(rows,prev)=>(rows||[]).map(r=>({time:localTime(r.measured_at),value:parseFloat(r.value),prev}));
+    for(const d of allDays){
+      const sl=summaries[d].sleep;
+      const ss=sl?.sleep_start?localTime(sl.sleep_start):undefined;
+      const se=sl?.sleep_end?localTime(sl.sleep_end):undefined;
+      const nocheObj=filterNight([...mapa(porFecha[prevDate(d)],true),...mapa(porFecha[d],false)],ss,se)
+        .filter(p=>!isNaN(p.value));
+      const noche=nocheObj.map(p=>p.value);
+      // Con las lecturas de la noche se calculan también ODI y T90, así la
+      // puntuación del calendario, gráficas y medias es la misma que al abrir el día.
+      summaries[d].odi=computeODI(nocheObj,sl?.total_sleep);
+      summaries[d].t90=computeT(nocheObj,90);
+      summaries[d].spo2_vals=noche;
+      summaries[d].spo2_min=noche.length?Math.min(...noche):null;
+      summaries[d].spo2_avg=noche.length?Math.round(noche.reduce((a,v)=>a+v,0)/noche.length):null;
+      summaries[d].ev94=noche.filter(v=>v<94).length;
+      summaries[d].ev90=noche.filter(v=>v<90).length;
+      summaries[d].spo2_n=noche.length;
+    }
+  }catch(e){console.warn('SpO2 nocturno: se usan los valores de spo2_daily',e);}
+
+  // Noche aún en curso: el último día sin registro de sueño (todavía no se ha
+  // despertado o no se ha sincronizado). Se excluye de resúmenes y medias.
+  // Solo si es HOY y antes de las 14:00: si a esa hora sigue sin sueño, es que
+  // el reloj no lo registró y se muestra la franja nocturna estimada.
+  const ult=allDays[allDays.length-1];
+  const ahora=new Date();
+  const hoyLocal=ahora.toLocaleDateString('sv-SE',{timeZone:'Europe/Madrid'});
+  const horaLocal=parseInt(ahora.toLocaleTimeString('en-GB',{timeZone:'Europe/Madrid',hour:'2-digit',hour12:false}));
+  if(ult&&!summaries[ult].sleep&&ult===hoyLocal&&horaLocal<14)summaries[ult].parcial=true;
 
   monthsMap={};
   for(const d of allDays){const m=d.substring(0,7);if(!monthsMap[m])monthsMap[m]=[];monthsMap[m].push(d);}
@@ -1953,8 +1996,9 @@ function runDetection(){
     if(base!=null&&rhrNow-base>=8)findings.push({lvl:'medio',txt:`FC en reposo más alta de lo habitual: ${Math.round(rhrNow)} bpm`,det:`Su base ronda ${Math.round(base)} bpm.`});
   }
   // 6) Calidad de señal SpO2
-  const spo2Count=(dayDetail[selectedDate]?.spo2||[]).length;
-  if(dayDetail[selectedDate]&&spo2Count>0&&spo2Count<PERFIL.minLecturasFiable){
+  // Lecturas de SpO2 DENTRO de la noche (antes contaba dos días completos y casi nunca saltaba)
+  const spo2Count=s.spo2_n??0;
+  if(s.spo2_n!=null&&spo2Count<PERFIL.minLecturasFiable){
     findings.push({lvl:'medio',txt:`Pocos datos de SpO2 esta noche (${spo2Count} lecturas)`,det:'La noche puede no ser representativa. Revisar ajuste de la correa.'});
   }
   // 7) Sueño corto
